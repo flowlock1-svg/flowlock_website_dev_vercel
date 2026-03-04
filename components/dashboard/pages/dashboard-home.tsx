@@ -1,8 +1,8 @@
 "use client"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Timer, Eye, CheckCircle2, TrendingUp } from "lucide-react"
-import type { AuthUser } from "@/app/page"
+import { Timer, Eye, CheckCircle2, TrendingUp, Loader2 } from "lucide-react"
+import type { AuthUser } from "@/components/providers/auth-provider"
 import type { FocusSessionResult } from "./focus-tracker"
 import {
   Bar,
@@ -18,6 +18,8 @@ import {
   AreaChart,
   CartesianGrid,
 } from "recharts"
+import { useEffect, useState } from "react"
+import { supabase } from "@/utils/supabase/client"
 
 interface DashboardHomeProps {
   user: AuthUser
@@ -30,8 +32,8 @@ const CustomTooltip = ({ active, payload, label }: any) => {
       <div className="bg-popover border border-border p-3 rounded-lg shadow-lg">
         <p className="text-sm font-medium text-popover-foreground">{label}</p>
         <p className="text-sm text-muted-foreground">
-          {payload[0].value}
-          {payload[0].name === "focus" || payload[0].payload.focus ? "m" : ""}
+          {typeof payload[0].value === "number" ? payload[0].value.toFixed(1) : payload[0].value}
+          {payload[0].name === "focus" || payload[0].payload?.focus ? "m" : ""}
           {payload[0].name === "hours" ? "h" : ""}
           {payload[0].name === "value" ? "%" : ""}
         </p>
@@ -41,29 +43,144 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   return null
 }
 
-export function DashboardHome({ user, lastFocusSession }: DashboardHomeProps) {
-  const studyData = [
-    { day: "Mon", focus: 240, breaks: 45 },
-    { day: "Tue", focus: 280, breaks: 50 },
-    { day: "Wed", focus: 320, breaks: 55 },
-    { day: "Thu", focus: 250, breaks: 40 },
-    { day: "Fri", focus: 290, breaks: 50 },
-    { day: "Sat", focus: 200, breaks: 30 },
-    { day: "Sun", focus: 150, breaks: 25 },
-  ]
+// Helper: ms to hours
+function msToHours(ms: number) {
+  return +(ms / (1000 * 60 * 60)).toFixed(1)
+}
 
-  const weeklyData = [
-    { week: "Week 1", hours: 12.5 },
-    { week: "Week 2", hours: 14.2 },
-    { week: "Week 3", hours: 16.8 },
-    { week: "Week 4", hours: 15.5 },
-  ]
+// Helper: ms to minutes
+function msToMinutes(ms: number) {
+  return Math.round(ms / (1000 * 60))
+}
+
+export function DashboardHome({ user, lastFocusSession }: DashboardHomeProps) {
+  const [isLoading, setIsLoading] = useState(true)
+  const [dailyData, setDailyData] = useState<any[]>([])
+  const [weeklyData, setWeeklyData] = useState<any[]>([])
+  const [totalStudyMs, setTotalStudyMs] = useState(0)
+  const [avgFocusScore, setAvgFocusScore] = useState(0)
+  const [totalSessions, setTotalSessions] = useState(0)
+  const [avgSessionMs, setAvgSessionMs] = useState(0)
+  const [totalDistractions, setTotalDistractions] = useState(0)
+  const [totalFocusedMs, setTotalFocusedMs] = useState(0)
+  const [totalDistractedMs, setTotalDistractedMs] = useState(0)
+  const [streakDays, setStreakDays] = useState(0)
+
+  useEffect(() => {
+    async function fetchData() {
+      setIsLoading(true)
+      try {
+        // Fetch daily stats for the last 7 days
+        const sevenDaysAgo = new Date()
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+
+        const { data: daily } = await supabase
+          .from("daily_stats")
+          .select("*")
+          .eq("user_id", user.id)
+          .gte("day", sevenDaysAgo.toISOString().split("T")[0])
+          .order("day", { ascending: true })
+
+        // Fetch weekly stats for the last 4 weeks
+        const fourWeeksAgo = new Date()
+        fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28)
+
+        const { data: weekly } = await supabase
+          .from("weekly_stats")
+          .select("*")
+          .eq("user_id", user.id)
+          .gte("week_start", fourWeeksAgo.toISOString().split("T")[0])
+          .order("week_start", { ascending: true })
+
+        // Fetch overall stats
+        const { data: allSessions } = await supabase
+          .from("study_sessions")
+          .select("duration_ms, focus_score, focused_time_ms, drowsy_count, head_turned_count, face_missing_count, started_at")
+          .eq("user_id", user.id)
+          .order("started_at", { ascending: false })
+
+        if (allSessions && allSessions.length > 0) {
+          const totalMs = allSessions.reduce((sum: number, s: any) => sum + s.duration_ms, 0)
+          const avgScore = Math.round(allSessions.reduce((sum: number, s: any) => sum + s.focus_score, 0) / allSessions.length)
+          const totalFocused = allSessions.reduce((sum: number, s: any) => sum + (s.focused_time_ms || 0), 0)
+          const totalDistracted = totalMs - totalFocused
+          const distractions = allSessions.reduce((sum: number, s: any) => sum + s.drowsy_count + s.head_turned_count + s.face_missing_count, 0)
+
+          setTotalStudyMs(totalMs)
+          setAvgFocusScore(avgScore)
+          setTotalSessions(allSessions.length)
+          setAvgSessionMs(Math.round(totalMs / allSessions.length))
+          setTotalDistractions(distractions)
+          setTotalFocusedMs(totalFocused)
+          setTotalDistractedMs(totalDistracted)
+
+          // Calculate streak (consecutive days with sessions)
+          const uniqueDays = new Set(allSessions.map((s: any) => new Date(s.started_at).toISOString().split("T")[0]))
+          let streak = 0
+          const today = new Date()
+          for (let i = 0; i < 365; i++) {
+            const d = new Date(today)
+            d.setDate(d.getDate() - i)
+            const key = d.toISOString().split("T")[0]
+            if (uniqueDays.has(key)) {
+              streak++
+            } else if (i > 0) {
+              break
+            }
+          }
+          setStreakDays(streak)
+        }
+
+        // Format daily data
+        const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+        if (daily && daily.length > 0) {
+          setDailyData(daily.map((d: any) => ({
+            day: dayNames[new Date(d.day + "T12:00:00").getDay()],
+            focus: msToMinutes(d.total_duration_ms),
+          })))
+        }
+
+        // Format weekly data
+        if (weekly && weekly.length > 0) {
+          setWeeklyData(weekly.map((w: any, i: number) => ({
+            week: `Week ${i + 1}`,
+            hours: msToHours(w.total_duration_ms),
+          })))
+        }
+      } catch (e) {
+        console.error("Failed to fetch dashboard data:", e)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    fetchData()
+  }, [user.id, lastFocusSession])
+
+  // Compute productivity distribution from real data
+  const productivePercent = totalStudyMs > 0 ? Math.round((totalFocusedMs / totalStudyMs) * 100) : 0
+  const distractedPercent = totalStudyMs > 0 ? Math.round((totalDistractedMs / totalStudyMs) * 100) : 0
+  const neutralPercent = Math.max(0, 100 - productivePercent - distractedPercent)
 
   const productivityData = [
-    { name: "Productive", value: 75, color: "#a78bfa" }, // purple-400
-    { name: "Neutral", value: 20, color: "#60a5fa" }, // blue-400
-    { name: "Distracted", value: 5, color: "#f87171" }, // red-400
+    { name: "Productive", value: productivePercent, color: "#a78bfa" },
+    { name: "Neutral", value: neutralPercent, color: "#60a5fa" },
+    { name: "Distracted", value: distractedPercent, color: "#f87171" },
   ]
+
+  // Format avg session time
+  const avgSessionMinutes = Math.floor(avgSessionMs / (1000 * 60))
+  const avgSessionDisplay = avgSessionMinutes >= 60
+    ? `${Math.floor(avgSessionMinutes / 60)}h ${avgSessionMinutes % 60}m`
+    : `${avgSessionMinutes}m`
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    )
+  }
 
   return (
     <div className="p-6 md:p-8 space-y-8 max-w-7xl mx-auto animate-in fade-in duration-500">
@@ -109,9 +226,11 @@ export function DashboardHome({ user, lastFocusSession }: DashboardHomeProps) {
           <CardContent className="p-6 space-y-2">
             <p className="text-sm font-medium text-muted-foreground">Total Study Time</p>
             <div className="space-y-1">
-              <p className="text-3xl font-bold tracking-tight text-foreground">18.5h</p>
-              <p className="text-xs font-medium text-emerald-500 flex items-center gap-1">
-                <TrendingUp size={12} /> +12% from last week
+              <p className="text-3xl font-bold tracking-tight text-foreground">
+                {totalStudyMs > 0 ? `${msToHours(totalStudyMs)}h` : "0h"}
+              </p>
+              <p className="text-xs font-medium text-muted-foreground">
+                {totalSessions} session{totalSessions !== 1 ? "s" : ""}
               </p>
             </div>
           </CardContent>
@@ -122,10 +241,10 @@ export function DashboardHome({ user, lastFocusSession }: DashboardHomeProps) {
             <p className="text-sm font-medium text-muted-foreground">Average Focus</p>
             <div className="space-y-1">
               <p className="text-3xl font-bold tracking-tight text-foreground">
-                {lastFocusSession ? `${lastFocusSession.score}%` : "92%"}
+                {lastFocusSession ? `${lastFocusSession.score}%` : avgFocusScore > 0 ? `${avgFocusScore}%` : "—"}
               </p>
               <p className="text-xs font-medium text-emerald-500">
-                {lastFocusSession ? "From last session" : "Excellent"}
+                {lastFocusSession ? "From last session" : avgFocusScore > 0 ? "Lifetime average" : "No data yet"}
               </p>
             </div>
           </CardContent>
@@ -138,18 +257,24 @@ export function DashboardHome({ user, lastFocusSession }: DashboardHomeProps) {
               <Timer size={16} className="text-muted-foreground/50" />
             </div>
             <div className="space-y-1">
-              <p className="text-3xl font-bold tracking-tight text-foreground">2h 15m</p>
-              <p className="text-xs font-medium text-emerald-500">+15min improvement</p>
+              <p className="text-3xl font-bold tracking-tight text-foreground">{totalSessions > 0 ? avgSessionDisplay : "—"}</p>
+              <p className="text-xs font-medium text-muted-foreground">Per session</p>
             </div>
           </CardContent>
         </Card>
 
         <Card>
           <CardContent className="p-6 space-y-2">
-            <p className="text-sm font-medium text-muted-foreground">Breaks Taken</p>
+            <p className="text-sm font-medium text-muted-foreground">Distractions</p>
             <div className="space-y-1">
-              <p className="text-3xl font-bold tracking-tight text-foreground">24</p>
-              <p className="text-xs font-medium text-emerald-500">Healthy pace</p>
+              <p className="text-3xl font-bold tracking-tight text-foreground">
+                {lastFocusSession
+                  ? lastFocusSession.drowsyCount + lastFocusSession.headTurnedCount + lastFocusSession.faceMissingCount
+                  : totalDistractions > 0 ? totalDistractions : "—"}
+              </p>
+              <p className="text-xs font-medium text-muted-foreground">
+                {lastFocusSession ? "Last session" : "All time"}
+              </p>
             </div>
           </CardContent>
         </Card>
@@ -158,8 +283,12 @@ export function DashboardHome({ user, lastFocusSession }: DashboardHomeProps) {
           <CardContent className="p-6 space-y-2">
             <p className="text-sm font-medium text-muted-foreground">Current Streak</p>
             <div className="space-y-1">
-              <p className="text-3xl font-bold tracking-tight text-foreground">7 days</p>
-              <p className="text-xs font-medium text-amber-500">Keep it up!</p>
+              <p className="text-3xl font-bold tracking-tight text-foreground">
+                {streakDays > 0 ? `${streakDays} day${streakDays !== 1 ? "s" : ""}` : "—"}
+              </p>
+              <p className="text-xs font-medium text-amber-500">
+                {streakDays > 0 ? "Keep it up!" : "Start a session!"}
+              </p>
             </div>
           </CardContent>
         </Card>
@@ -173,31 +302,37 @@ export function DashboardHome({ user, lastFocusSession }: DashboardHomeProps) {
             <CardTitle className="text-base font-semibold">Weekly Focus Pattern</CardTitle>
           </CardHeader>
           <CardContent className="p-6 min-h-[300px]">
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={studyData} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
-                <XAxis
-                  dataKey="day"
-                  stroke="#888888"
-                  fontSize={12}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <YAxis
-                  stroke="#888888"
-                  fontSize={12}
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={(value) => `${value}m`}
-                />
-                <Tooltip content={<CustomTooltip />} cursor={{ fill: "transparent" }} />
-                <Bar
-                  dataKey="focus"
-                  fill="currentColor"
-                  radius={[4, 4, 0, 0]}
-                  className="fill-primary"
-                />
-              </BarChart>
-            </ResponsiveContainer>
+            {dailyData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={dailyData} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
+                  <XAxis
+                    dataKey="day"
+                    stroke="#888888"
+                    fontSize={12}
+                    tickLine={false}
+                    axisLine={false}
+                  />
+                  <YAxis
+                    stroke="#888888"
+                    fontSize={12}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(value) => `${value}m`}
+                  />
+                  <Tooltip content={<CustomTooltip />} cursor={{ fill: "transparent" }} />
+                  <Bar
+                    dataKey="focus"
+                    fill="currentColor"
+                    radius={[4, 4, 0, 0]}
+                    className="fill-primary"
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-[300px] text-muted-foreground text-sm">
+                Complete a focus session to see your weekly pattern
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -207,40 +342,48 @@ export function DashboardHome({ user, lastFocusSession }: DashboardHomeProps) {
             <CardTitle className="text-base font-semibold">Productivity Distribution</CardTitle>
           </CardHeader>
           <CardContent className="p-6 min-h-[300px] flex gap-4 items-center justify-center">
-            <div className="h-[300px] w-full relative">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={productivityData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={80}
-                    paddingAngle={5}
-                    dataKey="value"
-                    stroke="none"
-                  >
-                    {productivityData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip content={<CustomTooltip />} />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                <span className="text-3xl font-bold text-foreground">75%</span>
-                <span className="text-xs text-muted-foreground uppercase tracking-wider">Productive</span>
-              </div>
-            </div>
-            {/* Legend */}
-            <div className="space-y-2 min-w-[120px]">
-              {productivityData.map((item) => (
-                <div key={item.name} className="flex items-center gap-2 text-sm">
-                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
-                  <span className="text-muted-foreground">{item.name}</span>
+            {totalSessions > 0 ? (
+              <>
+                <div className="h-[300px] w-full relative">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={productivityData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={80}
+                        paddingAngle={5}
+                        dataKey="value"
+                        stroke="none"
+                      >
+                        {productivityData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip content={<CustomTooltip />} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                    <span className="text-3xl font-bold text-foreground">{productivePercent}%</span>
+                    <span className="text-xs text-muted-foreground uppercase tracking-wider">Productive</span>
+                  </div>
                 </div>
-              ))}
-            </div>
+                {/* Legend */}
+                <div className="space-y-2 min-w-[120px]">
+                  {productivityData.map((item) => (
+                    <div key={item.name} className="flex items-center gap-2 text-sm">
+                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
+                      <span className="text-muted-foreground">{item.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="flex items-center justify-center h-[300px] text-muted-foreground text-sm">
+                Complete a focus session to see your productivity breakdown
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -250,72 +393,46 @@ export function DashboardHome({ user, lastFocusSession }: DashboardHomeProps) {
             <CardTitle className="text-base font-semibold">Monthly Study Trend</CardTitle>
           </CardHeader>
           <CardContent className="p-6 min-h-[300px]">
-            <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={weeklyData} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="colorHours" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="var(--primary)" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" opacity={0.4} />
-                <XAxis
-                  dataKey="week"
-                  stroke="#888888"
-                  fontSize={12}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <YAxis
-                  stroke="#888888"
-                  fontSize={12}
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={(value) => `${value}h`}
-                />
-                <Tooltip content={<CustomTooltip />} />
-                <Area
-                  type="monotone"
-                  dataKey="hours"
-                  stroke="var(--primary)"
-                  strokeWidth={2}
-                  fillOpacity={1}
-                  fill="url(#colorHours)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Insights */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card>
-          <CardContent className="p-6 space-y-2">
-            <p className="text-sm font-medium text-muted-foreground">Most Focused Time</p>
-            <div>
-              <p className="text-2xl font-bold tracking-tight text-foreground">2:00 PM - 4:00 PM</p>
-              <p className="text-sm text-muted-foreground mt-1">Your peak productivity hours</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-6 space-y-2">
-            <p className="text-sm font-medium text-muted-foreground">Distraction Alerts</p>
-            <div>
-              <p className="text-2xl font-bold tracking-tight text-foreground">
-                {lastFocusSession
-                  ? lastFocusSession.drowsyCount + lastFocusSession.headTurnedCount + lastFocusSession.faceMissingCount
-                  : 3}
-              </p>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="text-sm text-muted-foreground">
-                  {lastFocusSession ? "From last session" : "This week"}
-                </span>
-                {!lastFocusSession && <span className="text-xs font-medium text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded">↓ 40%</span>}
+            {weeklyData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <AreaChart data={weeklyData} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="colorHours" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="var(--primary)" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" opacity={0.4} />
+                  <XAxis
+                    dataKey="week"
+                    stroke="#888888"
+                    fontSize={12}
+                    tickLine={false}
+                    axisLine={false}
+                  />
+                  <YAxis
+                    stroke="#888888"
+                    fontSize={12}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(value) => `${value}h`}
+                  />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Area
+                    type="monotone"
+                    dataKey="hours"
+                    stroke="var(--primary)"
+                    strokeWidth={2}
+                    fillOpacity={1}
+                    fill="url(#colorHours)"
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-[300px] text-muted-foreground text-sm">
+                Complete sessions across multiple weeks to see your study trend
               </div>
-            </div>
+            )}
           </CardContent>
         </Card>
       </div>

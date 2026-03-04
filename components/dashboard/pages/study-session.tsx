@@ -16,7 +16,7 @@ import {
 } from "lucide-react"
 import { useState, useEffect, useRef, useCallback } from "react"
 import Script from "next/script"
-import type { AuthUser } from "@/app/page"
+import type { AuthUser } from "@/components/providers/auth-provider"
 import type { FocusSessionResult } from "./focus-tracker"
 import type { FaceLandmarker as FaceLandmarkerType } from "@mediapipe/tasks-vision"
 

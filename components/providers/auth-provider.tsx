@@ -1,18 +1,47 @@
 "use client"
 
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react"
-import type { AuthUser } from "@/app/page"
 import { useRouter } from "next/navigation"
+import { supabase } from "@/utils/supabase/client"
+import type { User } from "@supabase/supabase-js"
+
+export type UserRole = "student" | "admin"
+
+export interface AuthUser {
+    id: string
+    name: string
+    email: string
+    role: UserRole
+}
 
 interface AuthContextType {
     user: AuthUser | null
     isAuthenticated: boolean
-    login: (user: AuthUser) => void
+    isLoading: boolean
+    login: (email: string, password: string) => Promise<{ error?: string }>
+    signup: (email: string, password: string, name: string) => Promise<{ error?: string }>
     logout: () => void
     updateProfile: (userData: Partial<AuthUser>) => void
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
+
+async function fetchProfile(supaUser: User): Promise<AuthUser | null> {
+    const { data, error } = await supabase
+        .from("profiles")
+        .select("full_name, email, role")
+        .eq("id", supaUser.id)
+        .single()
+
+    if (error || !data) return null
+
+    return {
+        id: supaUser.id,
+        name: data.full_name || supaUser.user_metadata?.full_name || "",
+        email: data.email,
+        role: data.role as "student" | "admin",
+    }
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
     const [user, setUser] = useState<AuthUser | null>(null)
@@ -21,44 +50,83 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const router = useRouter()
 
     useEffect(() => {
-        // Check for persisted user in localStorage on mount
-        const storedUser = localStorage.getItem("flowlock_user")
-        if (storedUser) {
-            try {
-                const parsedUser = JSON.parse(storedUser)
-                setUser(parsedUser)
-                setIsAuthenticated(true)
-            } catch (e) {
-                console.error("Failed to parse stored user", e)
-                localStorage.removeItem("flowlock_user")
+        // Check existing session on mount
+        const initSession = async () => {
+            const { data: { session } } = await supabase.auth.getSession()
+            if (session?.user) {
+                const profile = await fetchProfile(session.user)
+                if (profile) {
+                    setUser(profile)
+                    setIsAuthenticated(true)
+                }
             }
+            setIsLoading(false)
         }
-        setIsLoading(false)
+
+        initSession()
+
+        // Listen for auth state changes (login, logout, token refresh)
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(
+            async (event, session) => {
+                if (event === "SIGNED_IN" && session?.user) {
+                    const profile = await fetchProfile(session.user)
+                    if (profile) {
+                        setUser(profile)
+                        setIsAuthenticated(true)
+                    }
+                } else if (event === "SIGNED_OUT") {
+                    setUser(null)
+                    setIsAuthenticated(false)
+                }
+            }
+        )
+
+        return () => subscription.unsubscribe()
     }, [])
 
-    const login = (newUser: AuthUser) => {
-        setUser(newUser)
-        setIsAuthenticated(true)
-        localStorage.setItem("flowlock_user", JSON.stringify(newUser))
+    const login = async (email: string, password: string): Promise<{ error?: string }> => {
+        const { error } = await supabase.auth.signInWithPassword({ email, password })
+        if (error) return { error: error.message }
         router.push("/dashboard")
+        return {}
     }
 
-    const logout = () => {
+    const signup = async (email: string, password: string, name: string): Promise<{ error?: string }> => {
+        const { error } = await supabase.auth.signUp({
+            email,
+            password,
+            options: {
+                data: { full_name: name, role: "student" },
+            },
+        })
+        if (error) return { error: error.message }
+        router.push("/dashboard")
+        return {}
+    }
+
+    const logout = async () => {
+        const { error } = await supabase.auth.signOut()
+        if (error) console.error("Error during logout:", error)
+
         setUser(null)
         setIsAuthenticated(false)
-        localStorage.removeItem("flowlock_user")
         router.push("/")
     }
 
-    const updateProfile = (userData: Partial<AuthUser>) => {
+    const updateProfile = async (userData: Partial<AuthUser>) => {
         if (!user) return
         const updatedUser = { ...user, ...userData }
         setUser(updatedUser)
-        localStorage.setItem("flowlock_user", JSON.stringify(updatedUser))
+
+        // Persist to Supabase
+        await supabase.from("profiles").update({
+            full_name: updatedUser.name,
+            role: updatedUser.role,
+        }).eq("id", user.id)
     }
 
     return (
-        <AuthContext.Provider value={{ user, isAuthenticated, login, logout, updateProfile }}>
+        <AuthContext.Provider value={{ user, isAuthenticated, isLoading, login, signup, logout, updateProfile }}>
             {!isLoading && children}
         </AuthContext.Provider>
     )

@@ -4,19 +4,9 @@ import { LoginPage } from "@/components/auth/login-page"
 import { useAuth } from "@/components/providers/auth-provider"
 import { useRouter } from "next/navigation"
 import { useEffect } from "react"
-export type UserRole = "student" | "teacher" | "admin"
-
-export interface AuthUser {
-  id: string
-  name: string
-  email: string
-  role: UserRole
-  grade?: string
-  className?: string
-}
 
 export default function Home() {
-  const { isAuthenticated, login } = useAuth()
+  const { isAuthenticated, login, signup } = useAuth()
   const router = useRouter()
 
   useEffect(() => {
@@ -26,8 +16,8 @@ export default function Home() {
   }, [isAuthenticated, router])
 
   if (isAuthenticated) {
-    return null // or loading spinner
+    return null
   }
 
-  return <LoginPage onLogin={login} />
+  return <LoginPage onLogin={login} onSignup={signup} />
 }

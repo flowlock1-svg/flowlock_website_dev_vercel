@@ -1,6 +1,6 @@
 "use client"
 
-import type { AuthUser } from "@/app/page"
+import type { AuthUser } from "@/components/providers/auth-provider"
 import { useState } from "react"
 import { Sidebar } from "./sidebar"
 import { DashboardHome } from "./pages/dashboard-home"

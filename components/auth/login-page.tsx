@@ -5,63 +5,44 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import type { AuthUser } from "@/app/page"
+import { Loader2 } from "lucide-react"
 
-const DEMO_CREDENTIALS = {
-  student: {
-    id: "1",
-    name: "Alex Johnson",
-    email: "alex.johnson@student.edu",
-    password: "student123",
-    role: "student" as const,
-    grade: "10th Grade",
-    className: "Class A",
-  },
-  admin: {
-    id: "3",
-    name: "Admin User",
-    email: "admin@flowlock.edu",
-    password: "admin123",
-    role: "admin" as const,
-  },
+interface LoginPageProps {
+  onLogin: (email: string, password: string) => Promise<{ error?: string }>
+  onSignup: (email: string, password: string, name: string) => Promise<{ error?: string }>
 }
 
-export function LoginPage({ onLogin }: { onLogin: (user: AuthUser) => void }) {
+export function LoginPage({ onLogin, onSignup }: LoginPageProps) {
   const [isSignup, setIsSignup] = useState(false)
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [name, setName] = useState("")
   const [error, setError] = useState("")
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
+    setIsSubmitting(true)
 
-    if (!isSignup) {
-      const demoUser = Object.values(DEMO_CREDENTIALS).find((u) => u.email === email && u.password === password)
-
-      if (demoUser) {
-        const { password: _, ...userWithoutPassword } = demoUser
-        onLogin(userWithoutPassword as AuthUser)
+    try {
+      if (isSignup) {
+        if (!name.trim()) {
+          setError("Please enter your full name.")
+          setIsSubmitting(false)
+          return
+        }
+        const result = await onSignup(email, password, name)
+        if (result.error) setError(result.error)
       } else {
-        setError("Invalid email or password. Try using demo credentials below.")
+        const result = await onLogin(email, password)
+        if (result.error) setError(result.error)
       }
-    } else {
-      onLogin({
-        id: String(Math.random()),
-        name,
-        email,
-        role: "student",
-        grade: "12th Grade",
-        className: "New Class",
-      })
+    } catch (err: any) {
+      setError(err.message || "An unexpected error occurred.")
+    } finally {
+      setIsSubmitting(false)
     }
-  }
-
-  const handleDemoLogin = (role: keyof typeof DEMO_CREDENTIALS) => {
-    const demoUser = DEMO_CREDENTIALS[role]
-    const { password: _, ...userWithoutPassword } = demoUser
-    onLogin(userWithoutPassword as AuthUser)
   }
 
   return (
@@ -143,47 +124,25 @@ export function LoginPage({ onLogin }: { onLogin: (user: AuthUser) => void }) {
                     onChange={(e) => setPassword(e.target.value)}
                     className="mt-1"
                     required
+                    minLength={6}
                   />
                 </div>
 
                 {error && <p className="text-sm text-red-500">{error}</p>}
 
-                <Button type="submit" className="w-full bg-primary hover:bg-primary/90">
-                  {isSignup ? "Create Account" : "Sign In"}
+                <Button type="submit" className="w-full bg-primary hover:bg-primary/90" disabled={isSubmitting}>
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      {isSignup ? "Creating Account..." : "Signing In..."}
+                    </>
+                  ) : (
+                    isSignup ? "Create Account" : "Sign In"
+                  )}
                 </Button>
               </form>
 
-              <div className="mt-6 space-y-3">
-                <div className="relative">
-                  <div className="absolute inset-0 flex items-center">
-                    <span className="w-full border-t border-muted" />
-                  </div>
-                  <div className="relative flex justify-center text-xs uppercase">
-                    <span className="bg-card px-2 text-muted-foreground">Demo Credentials</span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleDemoLogin("student")}
-                    className="text-xs"
-                  >
-                    Student
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleDemoLogin("admin")}
-                    className="text-xs"
-                  >
-                    Admin
-                  </Button>
-                </div>
-
+              <div className="mt-6">
                 <div className="mt-4 text-center">
                   <button
                     type="button"

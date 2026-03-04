@@ -7,7 +7,7 @@ import base64
 import os
 from insightface.app import FaceAnalysis
 from numpy.linalg import norm
-import json
+from supabase import create_client
 
 app = FastAPI()
 
@@ -20,7 +20,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize the face analysis model (same as in original scripts)
+# ── Supabase Setup ──
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://hocqkuziyusaazrkfijb.supabase.co")
+SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
+# The service role key bypasses RLS and allows the backend to manage any user's data.
+# Set it via environment variable: export SUPABASE_SERVICE_KEY="your-service-role-key"
+# You can find it in: Supabase Dashboard → Project Settings → API → service_role key
+
+# Fallback: use anon key if service key not available (for local dev with RLS disabled on backend ops)
+SUPABASE_ANON_KEY = os.environ.get(
+    "SUPABASE_ANON_KEY",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhvY3FrdXppeXVzYWF6cmtmaWpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1NDY1MjUsImV4cCI6MjA4ODEyMjUyNX0.Zy7Trb8Enp4oVItLZ_1Z-MJK1lxRmWcxkx3S2qMtYgA"
+)
+
+supa_key = SUPABASE_SERVICE_KEY if SUPABASE_SERVICE_KEY else SUPABASE_ANON_KEY
+supabase = create_client(SUPABASE_URL, supa_key)
+
+# Initialize the face analysis model
 try:
     print("Loading model...")
     face_app = FaceAnalysis(name="buffalo_l")
@@ -30,43 +46,95 @@ except Exception as e:
     print(f"Error loading model: {e}")
     face_app = None
 
-# Database path for storing user embedding
+# Legacy local fallback path
 DB_PATH = "database/user.npy"
-
-# Ensure the database directory exists
 os.makedirs("database", exist_ok=True)
+
 
 class ImageData(BaseModel):
     image: str  # Base64 encoded image string
+    user_id: str = ""  # Supabase user UUID (optional for backward compat)
+
 
 def base64_to_cv2(base64_string: str):
     """Convert base64 image string from React to OpenCV Mat format"""
-    # Remove header if present (e.g., "data:image/jpeg;base64,")
     if "," in base64_string:
         base64_string = base64_string.split(",")[1]
-    
     img_data = base64.b64decode(base64_string)
     np_arr = np.frombuffer(img_data, np.uint8)
     img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
     return img
 
-@app.get("/status")
-def status():
-    """Endpoint to check if the user is already enrolled"""
-    enrolled = os.path.exists(DB_PATH)
-    return {"enrolled": enrolled}
 
-@app.delete("/reset")
-def reset():
-    """Endpoint to remove the stored face and allow re-enrollment"""
+def get_stored_embedding(user_id: str):
+    """Retrieve stored embedding from Supabase, falling back to local file"""
+    if user_id:
+        try:
+            result = supabase.table("face_embeddings").select("embedding").eq("user_id", user_id).single().execute()
+            if result.data and result.data.get("embedding"):
+                return np.array(result.data["embedding"], dtype=np.float32)
+        except Exception as e:
+            print(f"Supabase fetch failed: {e}")
+
+    # Fallback to local file
+    if os.path.exists(DB_PATH):
+        return np.load(DB_PATH)
+    return None
+
+
+def save_embedding(user_id: str, embedding: np.ndarray):
+    """Save embedding to Supabase, with local file fallback"""
+    embedding_list = embedding.tolist()
+
+    if user_id:
+        try:
+            supabase.table("face_embeddings").upsert({
+                "user_id": user_id,
+                "embedding": embedding_list,
+            }).execute()
+            return
+        except Exception as e:
+            print(f"Supabase save failed: {e}")
+
+    # Fallback: save locally
+    np.save(DB_PATH, embedding)
+
+
+def delete_embedding(user_id: str):
+    """Delete embedding from Supabase, with local file fallback"""
+    if user_id:
+        try:
+            supabase.table("face_embeddings").delete().eq("user_id", user_id).execute()
+        except Exception as e:
+            print(f"Supabase delete failed: {e}")
+
+    # Also clean local
     if os.path.exists(DB_PATH):
         os.remove(DB_PATH)
-        return {"success": True, "message": "Face data removed. You can now re-enroll."}
-    return {"success": False, "message": "No face data found."}
+
+
+@app.get("/status")
+def status(user_id: str = ""):
+    """Check if the user has an enrolled face"""
+    if user_id:
+        try:
+            result = supabase.table("face_embeddings").select("id").eq("user_id", user_id).execute()
+            return {"enrolled": len(result.data) > 0}
+        except Exception:
+            pass
+    return {"enrolled": os.path.exists(DB_PATH)}
+
+
+@app.delete("/reset")
+def reset(user_id: str = ""):
+    """Remove the stored face and allow re-enrollment"""
+    delete_embedding(user_id)
+    return {"success": True, "message": "Face data removed. You can now re-enroll."}
+
 
 @app.post("/register")
 def register(data: ImageData):
-    """Endpoint to register a new user face"""
+    """Register a new user face"""
     if face_app is None:
         raise HTTPException(status_code=500, detail="Face analysis model not initialized")
 
@@ -78,27 +146,26 @@ def register(data: ImageData):
 
     if len(faces) == 0:
         return {"success": False, "message": "No face detected in the image."}
-    
+
     if len(faces) > 1:
         return {"success": False, "message": "Multiple faces detected. Please make sure only you are in the frame."}
 
-    # Save the embedding
     embedding = faces[0].embedding
-    np.save(DB_PATH, embedding)
-    
+    save_embedding(data.user_id, embedding)
+
     return {"success": True, "message": "Face registered successfully."}
+
 
 @app.post("/authenticate")
 def authenticate(data: ImageData):
-    """Endpoint to authenticate a user frame during the session"""
+    """Authenticate a user frame during the session"""
     if face_app is None:
         raise HTTPException(status_code=500, detail="Face analysis model not initialized")
 
-    if not os.path.exists(DB_PATH):
+    stored_embedding = get_stored_embedding(data.user_id)
+    if stored_embedding is None:
         raise HTTPException(status_code=400, detail="No registered user found. Please enroll first.")
 
-    stored_embedding = np.load(DB_PATH)
-    
     img = base64_to_cv2(data.image)
     if img is None:
         return {"authenticated": False, "message": "Invalid image data"}
@@ -108,23 +175,20 @@ def authenticate(data: ImageData):
     if len(faces) == 0:
         return {"authenticated": False, "message": "No face detected"}
 
-    # Use the largest face/first face found
     new_embedding = faces[0].embedding
-
     similarity = np.dot(stored_embedding, new_embedding) / (
         norm(stored_embedding) * norm(new_embedding)
     )
 
-    is_authenticated = bool(similarity > 0.6)  # numpy bool to native python bool
+    is_authenticated = bool(similarity > 0.6)
 
     return {
-        "authenticated": is_authenticated, 
+        "authenticated": is_authenticated,
         "similarity": float(similarity),
         "message": "Unlocked" if is_authenticated else "Access Denied"
     }
 
+
 if __name__ == "__main__":
     import uvicorn
-    # Make sure to run the server on a port that doesn't conflict with Next.js
     uvicorn.run(app, host="127.0.0.1", port=8000)
-

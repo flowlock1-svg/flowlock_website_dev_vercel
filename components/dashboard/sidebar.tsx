@@ -1,6 +1,6 @@
 import { BarChart3, Users, TrendingUp, Settings, Gamepad2, Menu, X, Clock, LogOut, Eye, Zap } from "lucide-react"
 import { useState } from "react"
-import type { UserRole } from "@/app/page"
+import type { UserRole } from "@/components/providers/auth-provider"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 
