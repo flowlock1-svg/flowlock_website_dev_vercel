@@ -9,10 +9,11 @@ import { Loader2 } from "lucide-react"
 
 interface LoginPageProps {
   onLogin: (email: string, password: string) => Promise<{ error?: string }>
+  onDemoLogin: () => void
   onSignup: (email: string, password: string, name: string) => Promise<{ error?: string }>
 }
 
-export function LoginPage({ onLogin, onSignup }: LoginPageProps) {
+export function LoginPage({ onLogin, onDemoLogin, onSignup }: LoginPageProps) {
   const [isSignup, setIsSignup] = useState(false)
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -139,6 +140,25 @@ export function LoginPage({ onLogin, onSignup }: LoginPageProps) {
                   ) : (
                     isSignup ? "Create Account" : "Sign In"
                   )}
+                </Button>
+
+                <div className="relative py-2">
+                  <div className="absolute inset-0 flex items-center">
+                    <span className="w-full border-t" />
+                  </div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-card px-2 text-muted-foreground">Or try the app</span>
+                  </div>
+                </div>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  onClick={onDemoLogin}
+                  disabled={isSubmitting}
+                >
+                  Login as Demo User
                 </Button>
               </form>
 

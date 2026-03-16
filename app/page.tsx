@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation"
 import { useEffect } from "react"
 
 export default function Home() {
-  const { isAuthenticated, login, signup } = useAuth()
+  const { isAuthenticated, login, demoLogin, signup } = useAuth()
   const router = useRouter()
 
   useEffect(() => {
@@ -19,5 +19,5 @@ export default function Home() {
     return null
   }
 
-  return <LoginPage onLogin={login} onSignup={signup} />
+  return <LoginPage onLogin={login} onDemoLogin={demoLogin} onSignup={signup} />
 }

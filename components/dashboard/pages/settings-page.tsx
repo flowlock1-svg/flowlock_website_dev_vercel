@@ -29,12 +29,33 @@ export function SettingsPage() {
       setFullName(user.name)
       setEmail(user.email)
     }
+
+    // Load actual notification prefs
+    setNotifications({
+      sessionReminder: localStorage.getItem("pref_session_reminders") !== "false",
+      breakAlert: localStorage.getItem("pref_break_alerts") !== "false",
+      motivational: localStorage.getItem("pref_motivational_messages") === "true",
+    })
+
   }, [user])
 
   const handleSaveProfile = () => {
     setIsSaving(true)
     updateProfile({ name: fullName, email })
     setTimeout(() => setIsSaving(false), 500) // visual feedback
+  }
+
+  const handleNotificationChange = (id: string, checked: boolean) => {
+    const newNotifs = { ...notifications, [id]: checked }
+    setNotifications(newNotifs)
+
+    if (id === "sessionReminder") {
+      localStorage.setItem("pref_session_reminders", String(checked))
+    } else if (id === "breakAlert") {
+      localStorage.setItem("pref_break_alerts", String(checked))
+    } else if (id === "motivational") {
+      localStorage.setItem("pref_motivational_messages", String(checked))
+    }
   }
 
   const isDark = mounted ? theme === "dark" : true
@@ -159,7 +180,7 @@ export function SettingsPage() {
               <input
                 type="checkbox"
                 checked={notifications[item.id as keyof typeof notifications]}
-                onChange={(e) => setNotifications({ ...notifications, [item.id]: e.target.checked })}
+                onChange={(e) => handleNotificationChange(item.id, e.target.checked)}
                 className="w-4 h-4"
               />
               <div>

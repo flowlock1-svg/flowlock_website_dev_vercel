@@ -6,3 +6,7 @@ onnxruntime
 opencv-python
 numpy
 pydantic
+flask
+flask-cors
+mediapipe
+pyautogui

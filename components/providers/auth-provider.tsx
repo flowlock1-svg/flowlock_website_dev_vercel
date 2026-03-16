@@ -12,6 +12,7 @@ export interface AuthUser {
     name: string
     email: string
     role: UserRole
+    isSpotifyLinked: boolean
 }
 
 interface AuthContextType {
@@ -19,12 +20,21 @@ interface AuthContextType {
     isAuthenticated: boolean
     isLoading: boolean
     login: (email: string, password: string) => Promise<{ error?: string }>
+    demoLogin: () => void
     signup: (email: string, password: string, name: string) => Promise<{ error?: string }>
     logout: () => void
     updateProfile: (userData: Partial<AuthUser>) => void
+    setSpotifyEnabled: (enabled: boolean) => void
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
+
+const SPOTIFY_STORAGE_KEY = "flowlock_spotify_enabled"
+
+function getSpotifyEnabled(): boolean {
+    if (typeof window === "undefined") return false
+    return localStorage.getItem(SPOTIFY_STORAGE_KEY) === "true"
+}
 
 async function fetchProfile(supaUser: User): Promise<AuthUser | null> {
     const { data, error } = await supabase
@@ -40,6 +50,7 @@ async function fetchProfile(supaUser: User): Promise<AuthUser | null> {
         name: data.full_name || supaUser.user_metadata?.full_name || "",
         email: data.email,
         role: data.role as "student" | "admin",
+        isSpotifyLinked: getSpotifyEnabled(),
     }
 }
 
@@ -50,17 +61,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const router = useRouter()
 
     useEffect(() => {
+        // Safety net: never stay in loading state longer than 5 seconds
+        const timeout = setTimeout(() => setIsLoading(false), 5000)
+
         // Check existing session on mount
         const initSession = async () => {
-            const { data: { session } } = await supabase.auth.getSession()
-            if (session?.user) {
-                const profile = await fetchProfile(session.user)
-                if (profile) {
-                    setUser(profile)
-                    setIsAuthenticated(true)
+            try {
+                const { data: { session } } = await supabase.auth.getSession()
+                if (session?.user) {
+                    const profile = await fetchProfile(session.user)
+                    if (profile) {
+                        setUser(profile)
+                        setIsAuthenticated(true)
+                    }
                 }
+            } catch (error) {
+                console.error("Failed to initialize session:", error)
+            } finally {
+                clearTimeout(timeout)
+                setIsLoading(false)
             }
-            setIsLoading(false)
         }
 
         initSession()
@@ -81,7 +101,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }
         )
 
-        return () => subscription.unsubscribe()
+        return () => {
+            clearTimeout(timeout)
+            subscription.unsubscribe()
+        }
     }, [])
 
     const login = async (email: string, password: string): Promise<{ error?: string }> => {
@@ -89,6 +112,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (error) return { error: error.message }
         router.push("/dashboard")
         return {}
+    }
+
+    const demoLogin = () => {
+        const demoUser: AuthUser = {
+            id: "demo-id-1234",
+            name: "Demo Student",
+            email: "demo@flowlock.app",
+            role: "student",
+            isSpotifyLinked: getSpotifyEnabled(),
+        }
+        setUser(demoUser)
+        setIsAuthenticated(true)
+        router.push("/dashboard")
     }
 
     const signup = async (email: string, password: string, name: string): Promise<{ error?: string }> => {
@@ -125,9 +161,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }).eq("id", user.id)
     }
 
+    const setSpotifyEnabled = (enabled: boolean) => {
+        if (typeof window !== "undefined") {
+            localStorage.setItem(SPOTIFY_STORAGE_KEY, String(enabled))
+        }
+        setUser((prev) => prev ? { ...prev, isSpotifyLinked: enabled } : prev)
+    }
+
+    if (isLoading) {
+        return (
+            <div style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                height: "100vh",
+                background: "#09090b",
+            }}>
+                <div style={{
+                    width: 40,
+                    height: 40,
+                    border: "3px solid #27272a",
+                    borderTop: "3px solid #a855f7",
+                    borderRadius: "50%",
+                    animation: "spin 0.8s linear infinite",
+                }} />
+                <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+            </div>
+        )
+    }
+
     return (
-        <AuthContext.Provider value={{ user, isAuthenticated, isLoading, login, signup, logout, updateProfile }}>
-            {!isLoading && children}
+        <AuthContext.Provider value={{ user, isAuthenticated, isLoading, login, demoLogin, signup, logout, updateProfile, setSpotifyEnabled }}>
+            {children}
         </AuthContext.Provider>
     )
 }

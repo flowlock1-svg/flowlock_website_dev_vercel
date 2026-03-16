@@ -2,6 +2,9 @@
 
 import { useAuth } from "@/components/providers/auth-provider"
 import { FocusProvider, useFocus } from "@/components/providers/focus-provider"
+import { PomodoroProvider } from "@/components/providers/pomodoro-provider"
+import { BreakOverlay } from "@/components/dashboard/break-overlay"
+import { PomodoroWidget } from "@/components/dashboard/pomodoro-widget"
 import { AppSidebar } from "@/components/dashboard/app-sidebar"
 import {
     DropdownMenu,
@@ -13,17 +16,28 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { LogOut, Settings, User, Eye, Square } from "lucide-react"
+import { LogOut, Settings, User, Eye, Square, AlertCircle, Play, Loader2 } from "lucide-react"
 import { useRouter, usePathname } from "next/navigation"
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import Link from "next/link"
 import { FocusTracker } from "@/components/dashboard/pages/focus-tracker"
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogDescription,
+    DialogFooter,
+} from "@/components/ui/dialog"
 
 function DashboardInner({ children }: { children: React.ReactNode }) {
     const { user, isAuthenticated, logout } = useAuth()
-    const { isFocusActive, focusElapsed, stopFocusSession, setLastFocusSession } = useFocus()
+    const { isFocusActive, focusElapsed, targetDuration, stopFocusSession, setLastFocusSession } = useFocus()
     const router = useRouter()
     const pathname = usePathname()
+
+    const [showAWWarning, setShowAWWarning] = useState(false)
+    const [startingAW, setStartingAW] = useState(false)
 
     const isOnFocusPage = pathname === "/dashboard/focus"
     const isStudent = user?.role === "student"
@@ -37,6 +51,53 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
         }
     }, [isAuthenticated, router])
 
+    useEffect(() => {
+        if (isAuthenticated && isStudent) {
+            const checkAWStatus = async () => {
+                try {
+                    const res = await fetch("/api/aw-proxy?endpoint=buckets", { signal: AbortSignal.timeout(4000) })
+                    if (!res.ok) {
+                        setShowAWWarning(true)
+                    }
+                } catch (error) {
+                    setShowAWWarning(true)
+                }
+            }
+            checkAWStatus()
+        }
+    }, [isAuthenticated, isStudent])
+
+    // Poll in the background if warning is showing (in case user starts it manually outside the app)
+    useEffect(() => {
+        let interval: ReturnType<typeof setInterval>
+        if (showAWWarning) {
+            interval = setInterval(async () => {
+                try {
+                    const res = await fetch("/api/aw-proxy?endpoint=buckets", { signal: AbortSignal.timeout(2000) })
+                    if (res.ok) {
+                        setShowAWWarning(false)
+                        setStartingAW(false)
+                    }
+                } catch (e) {}
+            }, 3000)
+        }
+        return () => {
+            if (interval) clearInterval(interval)
+        }
+    }, [showAWWarning])
+
+    const handleStartAW = async () => {
+        setStartingAW(true)
+        setShowAWWarning(false) // Close popup immediately
+        try {
+            await fetch('/api/aw-start', { method: 'POST' })
+        } catch (error) {
+            // silently ignore — background poll will re-show warning if AW never starts
+        } finally {
+            setStartingAW(false)
+        }
+    }
+
     if (!user) return null
 
     const formatElapsed = (seconds: number) => {
@@ -44,6 +105,10 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
         const s = (seconds % 60).toString().padStart(2, "0")
         return `${m}:${s}`
     }
+
+    const displayTime = targetDuration
+        ? formatElapsed(Math.max(0, targetDuration - focusElapsed))
+        : formatElapsed(focusElapsed)
 
     return (
         <div className="flex h-screen bg-background">
@@ -54,6 +119,7 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
                         <div className="flex items-center gap-4 w-full">
                             <h1 className="text-2xl font-bold text-primary">FlowLock</h1>
                             <div className="ml-auto flex items-center gap-4">
+                                <PomodoroWidget />
                                 <DropdownMenu>
                                     <DropdownMenuTrigger asChild>
                                         <Button variant="ghost" className="relative h-10 w-10 rounded-full">
@@ -110,7 +176,7 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
                                     <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
                                 </div>
                                 <span className="text-sm font-semibold text-emerald-400">Focus Session Active</span>
-                                <span className="text-sm font-mono text-emerald-300 tabular-nums">{formatElapsed(focusElapsed)}</span>
+                                <span className="text-sm font-mono text-emerald-300 tabular-nums">{displayTime}</span>
                             </div>
                             <div className="flex items-center gap-2">
                                 <Button
@@ -154,6 +220,41 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
                 <div className="p-6" style={{ display: isOnFocusPage ? 'none' : undefined }}>
                     {children}
                 </div>
+
+                {/* ActivityWatch Warning Dialog */}
+                <Dialog open={showAWWarning} onOpenChange={setShowAWWarning}>
+                    <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                            <DialogTitle className="flex items-center gap-2 text-destructive">
+                                <AlertCircle className="h-5 w-5" />
+                                ActivityWatch is Offline
+                            </DialogTitle>
+                            <DialogDescription className="text-base pt-2">
+                                Please activate ActivityWatch so that every minute gets tracked towards your productivity goals.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <DialogFooter className="mt-4 flex sm:justify-between">
+                            <Button 
+                                variant="outline" 
+                                onClick={() => setShowAWWarning(false)}
+                            >
+                                Remind Me Later
+                            </Button>
+                            <Button 
+                                onClick={handleStartAW} 
+                                disabled={startingAW}
+                                className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+                            >
+                                {startingAW ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                    <Play className="h-4 w-4" />
+                                )}
+                                {startingAW ? "Starting..." : "Start ActivityWatch"}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
             </main>
         </div>
     )
@@ -165,8 +266,11 @@ export default function DashboardLayout({
     children: React.ReactNode
 }) {
     return (
-        <FocusProvider>
-            <DashboardInner>{children}</DashboardInner>
-        </FocusProvider>
+        <PomodoroProvider>
+            <FocusProvider>
+                <BreakOverlay />
+                <DashboardInner>{children}</DashboardInner>
+            </FocusProvider>
+        </PomodoroProvider>
     )
 }

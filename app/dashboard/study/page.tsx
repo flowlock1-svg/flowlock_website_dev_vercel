@@ -18,5 +18,5 @@ export default function StudyRoute() {
         )
     }
 
-    return <StudySession user={user} onSessionComplete={setLastFocusSession} />
+    return <StudySession user={user} />
 }

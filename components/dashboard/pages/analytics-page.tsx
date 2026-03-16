@@ -600,6 +600,130 @@ function YearlyView({ userId }: { userId: string }) {
 export function AnalyticsPage() {
   const [period, setPeriod] = useState<Period>("Daily")
   const { user } = useAuth()
+  const [isExporting, setIsExporting] = useState(false)
+
+  const handleDownloadReport = async () => {
+    if (!user) return
+    setIsExporting(true)
+
+    try {
+      // 1. Fetch user profile data
+      const { data: profileData } = await supabase
+        .from("profiles")
+        .select("full_name, email")
+        .eq("id", user.id)
+        .single()
+
+      // 2. Fetch all study sessions for this user
+      const { data: sessions, error } = await supabase
+        .from("study_sessions")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("started_at", { ascending: false })
+
+      if (error) throw error
+
+      // 3. Calculate overall metrics
+      const totalSessions = sessions?.length || 0
+      let totalFocusMin = 0
+      let totalDrowsyMin = 0
+      let totalDistractedMin = 0
+
+      const activeDaysSet = new Set<string>()
+
+      sessions?.forEach(s => {
+        totalFocusMin += (s.focused_time_ms || 0) / 60000
+        totalDrowsyMin += (s.drowsy_time_ms || 0) / 60000
+        totalDistractedMin += ((s.head_turned_time_ms || 0) + (s.face_missing_time_ms || 0) + (s.unauthorized_time_ms || 0)) / 60000
+
+        const dateStr = new Date(s.started_at).toISOString().split('T')[0]
+        activeDaysSet.add(dateStr)
+      })
+
+      const totalActiveDays = activeDaysSet.size
+
+      // 4. Generate PDF
+      const { default: jsPDF } = await import("jspdf")
+      const { default: autoTable } = await import("jspdf-autotable")
+      const doc = new jsPDF()
+
+      // Document Properties
+      doc.setProperties({
+        title: "User Analytics Report",
+        subject: "FlowLock Focus Analytics",
+        author: profileData?.full_name || "FlowLock User",
+        creator: "FlowLock App"
+      })
+
+      // Brand / Title
+      doc.setFontSize(24)
+      doc.setTextColor(88, 28, 135) // primary purple
+      doc.text("FlowLock Analytics Report", 14, 22)
+
+      // User details
+      doc.setFontSize(11)
+      doc.setTextColor(80, 80, 80)
+      doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 32)
+      doc.text(`User: ${profileData?.full_name || "Unknown"} ${profileData?.email ? `(${profileData.email})` : ""}`, 14, 38)
+      doc.text(`Total Sessions: ${totalSessions}`, 14, 44)
+      doc.text(`Active Days: ${totalActiveDays}`, 14, 50)
+
+      // Overall Summary Metrics
+      doc.setFontSize(14)
+      doc.setTextColor(0, 0, 0)
+      doc.text("Overall Focus Summary", 14, 65)
+
+      autoTable(doc, {
+        startY: 70,
+        head: [["Metric", "Total Time (Hours:Minutes)"]],
+        body: [
+          ["Focused Time", `${Math.floor(totalFocusMin / 60)}h ${Math.round(totalFocusMin % 60)}m`],
+          ["Drowsy Time", `${Math.floor(totalDrowsyMin / 60)}h ${Math.round(totalDrowsyMin % 60)}m`],
+          ["Distracted Time", `${Math.floor(totalDistractedMin / 60)}h ${Math.round(totalDistractedMin % 60)}m`],
+        ],
+        theme: "grid",
+        headStyles: { fillColor: [88, 28, 135] },
+        margin: { top: 10, bottom: 10 }
+      })
+
+      // Recent Sessions Table
+      const recentSessions = sessions?.slice(0, 50) || [] // Limit to last 50 for the PDF
+
+      doc.setFontSize(14)
+      doc.text("Recent Sessions (Up to 50)", 14, (doc as any).lastAutoTable.finalY + 15)
+
+      autoTable(doc, {
+        startY: (doc as any).lastAutoTable.finalY + 20,
+        head: [["Date", "Duration", "Focus Score", "Focused Time", "Distractions"]],
+        body: recentSessions.map(s => {
+          const date = new Date(s.started_at).toLocaleDateString() + " " + new Date(s.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          const durationMins = Math.round(s.duration_ms / 60000)
+          const focusMins = Math.round((s.focused_time_ms || 0) / 60000)
+          const distractions = (s.drowsy_count || 0) + (s.head_turned_count || 0) + (s.face_missing_count || 0) + (s.unauthorized_count || 0)
+
+          return [
+            date,
+            `${durationMins}m`,
+            `${s.focus_score}%`,
+            `${focusMins}m`,
+            distractions.toString()
+          ]
+        }),
+        theme: "striped",
+        headStyles: { fillColor: [88, 28, 135] },
+        styles: { fontSize: 9 }
+      })
+
+      // Save PDF
+      doc.save(`flowlock_analytics_${new Date().toISOString().split('T')[0]}.pdf`)
+
+    } catch (error) {
+      console.error("Failed to generate PDF report:", error)
+      alert("Failed to generate report. Please try again.")
+    } finally {
+      setIsExporting(false)
+    }
+  }
 
   if (!user) return null
 
@@ -612,8 +736,13 @@ export function AnalyticsPage() {
             Detailed insights into study behavior and performance
           </p>
         </div>
-        <Button className="gap-2 bg-primary hover:bg-primary/90 w-full md:w-auto">
-          <Download size={18} /> Download Report
+        <Button
+          onClick={handleDownloadReport}
+          disabled={isExporting}
+          className="gap-2 bg-primary hover:bg-primary/90 w-full md:w-auto"
+        >
+          {isExporting ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
+          {isExporting ? "Generating PDF..." : "Download Report"}
         </Button>
       </div>
 
@@ -646,14 +775,20 @@ export function AnalyticsPage() {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Button variant="outline" className="justify-start bg-transparent gap-2">
-              <Download size={18} /> Export as PDF
+            <Button
+              variant="outline"
+              onClick={handleDownloadReport}
+              disabled={isExporting}
+              className="justify-start bg-transparent gap-2"
+            >
+              {isExporting ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
+              Export as PDF
             </Button>
-            <Button variant="outline" className="justify-start bg-transparent gap-2">
-              <Download size={18} /> Export as Excel
+            <Button variant="outline" className="justify-start bg-transparent gap-2 disabled:opacity-50" disabled>
+              <Download size={18} /> Export as Excel (Coming Soon)
             </Button>
-            <Button variant="outline" className="justify-start bg-transparent gap-2">
-              <Download size={18} /> Export as CSV
+            <Button variant="outline" className="justify-start bg-transparent gap-2 disabled:opacity-50" disabled>
+              <Download size={18} /> Export as CSV (Coming Soon)
             </Button>
           </div>
         </CardContent>

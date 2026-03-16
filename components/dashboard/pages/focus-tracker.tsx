@@ -2,13 +2,15 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Eye, Play, Square, RotateCcw, AlertTriangle, CheckCircle2, Download, Mic, Volume2, ChevronDown, ChevronUp } from "lucide-react"
+import { Eye, Play, Square, RotateCcw, AlertTriangle, CheckCircle2, Download, Mic, Volume2, ChevronDown, ChevronUp, Gamepad2 } from "lucide-react"
 import { useState, useEffect, useRef, useCallback } from "react"
+import { useRouter } from "next/navigation"
 import Script from "next/script"
 import type { FaceLandmarker as FaceLandmarkerType } from "@mediapipe/tasks-vision"
 import { useNoiseDetector } from "@/hooks/use-noise-detector"
 import { useAuth } from "@/components/providers/auth-provider"
 import { useFocus } from "@/components/providers/focus-provider"
+import { usePomodoro } from "@/components/providers/pomodoro-provider"
 import { supabase } from "@/utils/supabase/client"
 import { toast } from "sonner"
 import { useFaceAuth } from "@/hooks/use-face-auth"
@@ -57,7 +59,6 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
         unauth: "0.0s",
         ear: "0.00",
         yaw: "0°",
-        duration: "00:00",
     })
     const [result, setResult] = useState<FocusSessionResult | null>(null)
 
@@ -66,7 +67,9 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
     // Noise detection hook
     const { noiseState, startNoise, stopNoise, setAlertCallback } = useNoiseDetector()
     const { user } = useAuth()
-    const { startFocusSession, stopFocusSession, setFocusElapsed, isFocusActive } = useFocus()
+    const { startFocusSession, stopFocusSession, setFocusElapsed, isFocusActive, targetDuration, focusElapsed } = useFocus()
+    const { completeSession } = usePomodoro()
+    const router = useRouter()
     const {
         loadModels,
         isModelsLoaded,
@@ -94,16 +97,23 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
     const durationIntervalRef = useRef<NodeJS.Timeout | null>(null)
     const authIntervalRef = useRef<NodeJS.Timeout | null>(null)
     const isUnauthorizedRef = useRef<boolean>(false)
+    const hasDownloadedRef = useRef<boolean>(false)
     const processDetectionRef = useRef<(faceLandmarks: any[], ctx: CanvasRenderingContext2D) => void>(() => { })
     const authenticateFaceRef = useRef(authenticateFace)
 
     // Register noise alert callback
     useEffect(() => {
-        setAlertCallback(() => {
-            toast.warning("🚨 High Noise Detected!", {
+        setAlertCallback((label, conf) => {
+            toast.warning(`🚨 High Noise Detected (${label})!`, {
                 duration: 4000,
                 position: "top-right",
             })
+            if ("Notification" in window && Notification.permission === "granted") {
+                new Notification("🚨 High Noise Alert", {
+                    body: `Distracting noise detected: ${label}`,
+                    icon: "/favicon.ico" // Assuming favicon exists, fallback is default
+                })
+            }
         })
     }, [setAlertCallback])
 
@@ -163,12 +173,24 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
                 updateStatusUI("✓ Focused", "focused")
             } else if (newStatus === "DROWSY") {
                 updateStatusUI("⚠ Distraction: Drowsiness", "warning")
+                if ("Notification" in window && Notification.permission === "granted") {
+                    new Notification("Focus Alert", { body: "You appear drowsy. Stay alert!" })
+                }
             } else if (newStatus === "HEAD_TURNED") {
                 updateStatusUI("⚠ Distraction: Head Turned Away", "warning")
+                if ("Notification" in window && Notification.permission === "granted") {
+                    new Notification("Focus Alert", { body: "Please keep your head facing the screen." })
+                }
             } else if (newStatus === "FACE_MISSING") {
-                updateStatusUI("⚠ Distraction: Face Not In Frame", "warning")
+                updateStatusUI("⚠ Distraction: Face Not Detected", "warning")
+                if ("Notification" in window && Notification.permission === "granted") {
+                    new Notification("Focus Alert", { body: "Face not detected. Are you at your screen?" })
+                }
             } else if (newStatus === "UNAUTHORIZED") {
-                updateStatusUI("🚨 ALERT: Unauthorized User Detected", "warning")
+                updateStatusUI("⚠ Distraction: Unauthorized Face", "warning")
+                if ("Notification" in window && Notification.permission === "granted") {
+                    new Notification("Focus Alert", { body: "Unauthorized person detected!" })
+                }
             }
         },
         [updateStatusUI]
@@ -301,17 +323,20 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
         if (!ctx) return
 
         try {
-            const results = modelRef.current.detectForVideo(videoRef.current, performance.now())
+            // Guard to ensure video is fully ready before passing it to TensorFlow
+            if (videoRef.current.readyState >= 2 && videoRef.current.videoWidth > 0 && videoRef.current.videoHeight > 0) {
+                const results = modelRef.current.detectForVideo(videoRef.current, performance.now())
 
-            if (!canvasRef.current) return
-            ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
-            ctx.save()
-            ctx.scale(-1, 1)
-            ctx.translate(-canvasRef.current.width, 0)
+                if (!canvasRef.current) return
+                ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
+                ctx.save()
+                ctx.scale(-1, 1)
+                ctx.translate(-canvasRef.current.width, 0)
 
-            processDetectionRef.current(results.faceLandmarks, ctx)
+                processDetectionRef.current(results.faceLandmarks, ctx)
 
-            ctx.restore()
+                ctx.restore()
+            }
         } catch (e) {
             console.error("Detection frame error:", e)
         }
@@ -368,6 +393,11 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
     // Start session
     const handleStart = useCallback(async () => {
         try {
+            // Request Notification Permissions if needed
+            if ("Notification" in window && Notification.permission !== "granted" && Notification.permission !== "denied") {
+                await Notification.requestPermission()
+            }
+
             setPhase("active")
 
             // Reset state
@@ -376,7 +406,13 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
             historyRef.current = []
             currentStatusRef.current = "FOCUSED"
             isUnauthorizedRef.current = false
+            hasDownloadedRef.current = false
             lastFrameTimeRef.current = Date.now()
+
+            // ---- INITIALIZATION SEQUENCE UPDATE ----
+            // 1. Load Audio Model FIRST
+            updateStatusUI("Loading Audio Distraction Model...", "neutral")
+            await startNoise()
 
             if (videoRef.current) {
                 videoRef.current.width = 640
@@ -387,12 +423,13 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
                 canvasRef.current.height = 480
             }
 
+            // 2. Request Camera AFTER Audio Model is ready
             updateStatusUI("Requesting Camera...", "neutral")
             await setupCamera()
 
-            // Load MediaPipe FaceLandmarker model with GPU delegate
+            // 3. Load Vision Models
             if (!modelRef.current) {
-                updateStatusUI("Loading AI Model... (This may take a moment)", "neutral")
+                updateStatusUI("Loading Vision AI Models...", "neutral")
                 const { FaceLandmarker, FilesetResolver } = await import("@mediapipe/tasks-vision")
                 const filesetResolver = await FilesetResolver.forVisionTasks(
                     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.32/wasm"
@@ -417,23 +454,23 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
             // Signal to provider that session is active
             startFocusSession()
 
-            // Start noise detection
-            startNoise()
-
             // Duration ticker
             durationIntervalRef.current = setInterval(() => {
                 const elapsed = Date.now() - startTimeRef.current
                 const elapsedSec = Math.floor(elapsed / 1000)
                 setFocusElapsed(elapsedSec)
-                setMetrics((prev) => ({
-                    ...prev,
-                    duration: `${Math.floor(elapsed / 60000)
-                        .toString()
-                        .padStart(2, "0")}:${Math.floor((elapsed / 1000) % 60)
-                            .toString()
-                            .padStart(2, "0")}`,
-                }))
-            }, 1000)
+
+                let displaySec = elapsedSec
+                if (targetDuration) {
+                    const remaining = Math.max(0, targetDuration - elapsedSec)
+                    displaySec = remaining
+                    if (remaining <= 0) {
+                        // Auto-stop when target is reached
+                        handleStop()
+                        return
+                    }
+                }
+            }, 1000) as unknown as NodeJS.Timeout
 
             // Background auth interval (in-browser using face-api)
             authIntervalRef.current = setInterval(async () => {
@@ -448,7 +485,7 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
                 } catch (e) {
                     console.error("Auth error:", e)
                 }
-            }, 5000)
+            }, 5000) as unknown as NodeJS.Timeout
 
             detectLoop()
         } catch (error: any) {
@@ -552,13 +589,101 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
         setResult(sessionResult)
         setPhase("results")
 
+        // Call Pomodoro completion logic
+        // If there was a target duration, use it (converted to mins). Else use actual duration.
+        const intendedDurationMins = targetDuration ? targetDuration / 60 : totalDuration / 60000
+        completeSession(intendedDurationMins)
+
         // Signal to provider that session ended
         stopFocusSession()
+
+        // Show motivational message if user opted in
+        if (typeof localStorage !== "undefined" && localStorage.getItem("pref_motivational_messages") === "true") {
+            const highScoreMessages = [
+                "🌟 Phenomenal focus! You're unstoppable — keep up the great work!",
+                "🔥 Outstanding session! Your dedication is truly inspiring.",
+                "💪 You crushed it! That level of focus is what champions are made of.",
+                "🚀 Incredible work! Every session like this brings you closer to your goals.",
+                "🏆 Top-tier performance! You should be proud of your concentration.",
+                "✨ Brilliant focus! You make hard things look easy. Keep it up!",
+            ]
+            const midScoreMessages = [
+                "👍 Solid session! You're building great habits — consistency is key.",
+                "📈 Good effort! Every session is a step forward. Keep going!",
+                "💡 Nice work! A little more focus each day and you'll be unstoppable.",
+                "🌱 Growing stronger! Each session plants the seeds of success.",
+                "⚡ Good session! Stay consistent and watch yourself improve every day.",
+                "🎯 You're on track! Progress, not perfection — you're doing great.",
+            ]
+            const lowScoreMessages = [
+                "🌤️ Every expert was once a beginner. Tomorrow is a fresh start!",
+                "💪 Don't be discouraged — every session teaches you something new.",
+                "🔄 Tough session? That's okay! What matters is that you showed up.",
+                "🌱 Growth takes time. Keep going — you're building something great.",
+                "🧠 Distracted days happen. Rest up and come back stronger tomorrow!",
+                "🎯 The comeback is always stronger than the setback. Keep pushing!",
+            ]
+
+            let pool: string[]
+            if (score >= 80) pool = highScoreMessages
+            else if (score >= 50) pool = midScoreMessages
+            else pool = lowScoreMessages
+
+            const msg = pool[Math.floor(Math.random() * pool.length)]
+
+            if ("Notification" in window && Notification.permission === "granted") {
+                new Notification("Great session, champ! 🎉", { body: msg })
+            }
+            toast.success(msg, { duration: 6000, position: "top-center" })
+        }
 
         if (onSessionComplete) {
             onSessionComplete(sessionResult)
         }
-    }, [onSessionComplete])
+
+        // Extremely important: Forcefully route back to this tracker so they don't miss the PDF and graphs
+        router.push("/dashboard/focus")
+    }, [onSessionComplete, router])
+
+    const handleDownloadReport = useCallback(async () => {
+        if (!result) return
+
+        try {
+            const { default: jsPDF } = await import("jspdf")
+            const { default: autoTable } = await import("jspdf-autotable")
+            const doc = new jsPDF()
+
+            // Header
+            doc.setFontSize(22)
+            doc.setTextColor(0, 0, 0)
+            doc.text("Focus Session Report", 14, 20)
+
+            // Essential Metrics
+            doc.setFontSize(12)
+            doc.text(`Focus Score: ${result.score}%`, 14, 30)
+            doc.text(`Total Duration: ${formatTime(result.duration)}`, 14, 38)
+            doc.text(`Focused Time: ${formatTime(result.focusedTime)}`, 14, 46)
+
+            // Detailed Metrics Table
+            autoTable(doc, {
+                startY: 55,
+                head: [["Metric", "Count", "Time"]],
+                body: [
+                    ["Drowsy Events", result.drowsyCount.toString(), formatTime(result.drowsyTime)],
+                    ["Head Turned Events", result.headTurnedCount.toString(), formatTime(result.headTurnedTime)],
+                    ["Face Missing Events", result.faceMissingCount.toString(), formatTime(result.faceMissingTime)],
+                    ["Unauthorized User Events", result.unauthorizedCount.toString(), formatTime(result.unauthorizedTime)],
+                    ["High Noise Events", result.highNoiseCount.toString(), "-"],
+                ],
+                theme: "grid",
+                headStyles: { fillColor: [88, 28, 135] }, // primary purple-ish
+            })
+
+            doc.save("focus_report.pdf")
+        } catch (error) {
+            console.error("Failed to generate PDF:", error)
+        }
+    }, [result, formatTime])
 
     // Render chart when results phase is entered
     useEffect(() => {
@@ -570,23 +695,46 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
 
             const ctx = chartCanvasRef.current.getContext("2d")
             chartInstanceRef.current = new Chart(ctx, {
-                type: "doughnut",
+                type: "bar",
                 data: {
-                    labels: ["Focused", "Drowsy", "Head Turned", "Missing", "Unauthorized"],
+                    labels: ["Drowsy", "Head Turned", "Missing", "Unauthorized", "High Noise"],
                     datasets: [
                         {
-                            data: [result.focusedTime, result.drowsyTime, result.headTurnedTime, result.faceMissingTime, result.unauthorizedTime],
-                            backgroundColor: ["#10b981", "#f59e0b", "#ef4444", "#6b7280", "#a855f7"],
+                            label: "Number of Distractions",
+                            data: [result.drowsyCount, result.headTurnedCount, result.faceMissingCount, result.unauthorizedCount, result.highNoiseCount],
+                            backgroundColor: ["#f59e0b", "#ef4444", "#6b7280", "#a855f7", "#f97316"],
+                            borderRadius: 4,
                         },
                     ],
                 },
                 options: {
                     responsive: true,
-                    plugins: { legend: { position: "bottom" } },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: (context: any) => `${context.raw} events`
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: { precision: 0, stepSize: 1 }
+                        }
+                    }
                 },
             })
+
+            // Auto-generate PDF report once per session
+            if (!hasDownloadedRef.current) {
+                hasDownloadedRef.current = true;
+                setTimeout(() => {
+                    handleDownloadReport();
+                }, 500); // Small delay to let UI render completely first
+            }
         }
-    }, [phase, result])
+    }, [phase, result, handleDownloadReport])
 
     // Cleanup on unmount
     useEffect(() => {
@@ -614,35 +762,14 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
         }
     }, [isFocusActive, phase])
 
-    const handleDownloadReport = useCallback(() => {
-        if (!result) return
-        const data = JSON.stringify(
-            {
-                score: result.score,
-                duration: formatTime(result.duration),
-                drowsyCount: result.drowsyCount,
-                headTurnedCount: result.headTurnedCount,
-                faceMissingCount: result.faceMissingCount,
-                unauthorizedCount: result.unauthorizedCount,
-                highNoiseCount: result.highNoiseCount,
-                focusedTime: formatTime(result.focusedTime),
-                drowsyTime: formatTime(result.drowsyTime),
-                headTurnedTime: formatTime(result.headTurnedTime),
-                faceMissingTime: formatTime(result.faceMissingTime),
-                unauthorizedTime: formatTime(result.unauthorizedTime),
-                history: historyRef.current,
-            },
-            null,
-            2
-        )
-        const blob = new Blob([data], { type: "application/json" })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement("a")
-        a.href = url
-        a.download = "focus_report.json"
-        a.click()
-        URL.revokeObjectURL(url)
-    }, [result, formatTime])
+    // External start detection — when StudySession sets it active
+    const handleStartRef = useRef(handleStart)
+    useEffect(() => { handleStartRef.current = handleStart }, [handleStart])
+    useEffect(() => {
+        if (isFocusActive && phase === "ready" && isEnrolled === true) {
+            handleStartRef.current()
+        }
+    }, [isFocusActive, phase, isEnrolled])
 
     return (
         <div style={{ display: visible ? undefined : 'none' }}>
@@ -779,6 +906,16 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
                 {/* ── ACTIVE PHASE ── */}
                 {phase === "active" && (
                     <div className="animate-in fade-in duration-300 space-y-6">
+                        {/* Giant Timer Display */}
+                        <div className="flex justify-center py-4">
+                            <div className="text-7xl md:text-[120px] font-mono font-bold text-primary tracking-tighter tabular-nums drop-shadow-sm">
+                                {targetDuration
+                                    ? `${Math.floor(Math.max(0, targetDuration - focusElapsed) / 60).toString().padStart(2, "0")}:${Math.floor(Math.max(0, targetDuration - focusElapsed) % 60).toString().padStart(2, "0")}`
+                                    : `${Math.floor(focusElapsed / 60).toString().padStart(2, "0")}:${Math.floor(focusElapsed % 60).toString().padStart(2, "0")}`
+                                }
+                            </div>
+                        </div>
+
                         {/* Status banner */}
                         <div
                             className={`w-full py-4 px-6 text-center text-lg font-bold text-white rounded-xl transition-colors duration-500 ${statusType === "focused"
@@ -831,7 +968,6 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
                                             { label: "Unauthorized", value: metrics.unauth, id: "unauth" },
                                             { label: "EAR", value: metrics.ear, id: "ear" },
                                             { label: "Yaw", value: metrics.yaw, id: "yaw" },
-                                            { label: "Duration", value: metrics.duration, id: "duration" },
                                         ].map((m) => (
                                             <div
                                                 key={m.id}
@@ -971,7 +1107,8 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
                             </CardHeader>
                             <CardContent className="space-y-6">
                                 {/* Chart */}
-                                <div className="max-w-xs mx-auto">
+                                <div className="max-w-md mx-auto mb-6">
+                                    <h3 className="text-center font-medium text-sm text-muted-foreground mb-3">Distractions Count</h3>
                                     <canvas ref={chartCanvasRef} />
                                 </div>
 
@@ -1027,16 +1164,30 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
                                     ))}
                                 </div>
 
-                                {/* Actions */}
-                                <div className="flex gap-3 justify-center pt-2">
-                                    <Button onClick={() => setPhase("ready")} className="gap-2">
-                                        <RotateCcw size={18} />
-                                        New Session
-                                    </Button>
-                                    <Button variant="outline" onClick={handleDownloadReport} className="gap-2 bg-transparent">
-                                        <Download size={18} />
-                                        Download Report
-                                    </Button>
+                                {/* Divider & Actions */}
+                                <div className="pt-4 border-t border-border space-y-4">
+                                    <div className="flex flex-col items-center justify-center gap-1">
+                                        <p className="text-sm font-medium text-muted-foreground uppercase tracking-widest text-center">
+                                            Session Complete!
+                                        </p>
+                                        <p className="text-xs text-muted-foreground text-center">
+                                            Would you like to play some games to unwind and relax your brain?
+                                        </p>
+                                    </div>
+                                    <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                                        <Button onClick={() => router.push("/dashboard/games")} className="gap-2 bg-primary hover:bg-primary/90 text-primary-foreground">
+                                            <Gamepad2 size={18} />
+                                            Yes, take me to Games!
+                                        </Button>
+                                        <Button variant="outline" onClick={() => setPhase("ready")} className="gap-2 bg-transparent">
+                                            <RotateCcw size={18} />
+                                            No, Start New Session
+                                        </Button>
+                                        <Button variant="default" onClick={handleDownloadReport} className="gap-2">
+                                            <Download size={18} />
+                                            Download Report
+                                        </Button>
+                                    </div>
                                 </div>
                             </CardContent>
                         </Card>

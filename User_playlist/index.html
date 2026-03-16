@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sonar Focus | AI Music Recommender</title>
+    <meta name="description" content="Generate perfect study music queries based on your mood, energy, and duration.">
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <div class="logo">SONAR</div>
+        <div class="header-action">v1.2.0</div>
+      </header>
+
+      <main>
+        <div class="hero">
+          <h1>Sync Your State</h1>
+          <p>Curated search queries engineered for your cognitive peak.</p>
+          
+          <div class="status-grid">
+            <div class="status-card">
+              <div class="status-label">Mood</div>
+              <div class="status-value">FOCUS</div>
+            </div>
+            <div class="status-card">
+              <div class="status-label">Duration</div>
+              <div class="status-value">50 MIN</div>
+            </div>
+            <div class="status-card">
+              <div class="status-label">Energy</div>
+              <div class="status-value">LOW</div>
+            </div>
+          </div>
+        </div>
+
+        <section class="query-section">
+          <h2 class="section-title">ENGINEERING QUERIES</h2>
+          <div id="query-container" class="query-grid">
+            <!-- Queries injected by JS -->
+          </div>
+        </section>
+      </main>
+
+      <div id="notification" class="notification">Query copied to clipboard!</div>
+      
+      <!-- Hidden YouTube Player -->
+      <div id="youtube-player" style="display: none;"></div>
+    </div>
+    <script src="https://www.youtube.com/iframe_api"></script>
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>

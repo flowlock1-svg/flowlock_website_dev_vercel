@@ -1,6 +1,6 @@
 "use client"
 
-import { BarChart3, Users, TrendingUp, Settings, Gamepad2, Menu, X, Clock, LogOut, Eye, Zap } from "lucide-react"
+import { BarChart3, Users, TrendingUp, Settings, Gamepad2, Menu, X, Clock, LogOut, Eye, Zap, Monitor, FileBarChart, Music2, Play, Pause } from "lucide-react"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -13,9 +13,14 @@ interface AppSidebarProps {
     onLogout: () => void
 }
 
+import { useFocus } from "@/components/providers/focus-provider"
+
 export function AppSidebar({ userRole, onLogout }: AppSidebarProps) {
     const [isOpen, setIsOpen] = useState(false)
     const pathname = usePathname()
+    
+    const { isSonarPlaying, isSpotifyPlaying, stopAllMusic, toggleAllMusic } = useFocus()
+    const isPlayingAny = isSonarPlaying || isSpotifyPlaying
 
     const menuItems = [
         { id: "dashboard", label: "Dashboard", icon: BarChart3, href: "/dashboard", roles: ["student", "admin"] as const },
@@ -23,7 +28,9 @@ export function AppSidebar({ userRole, onLogout }: AppSidebarProps) {
         { id: "study", label: "Study Session", icon: Clock, href: "/dashboard/study", roles: ["student"] as const },
         { id: "users", label: "User Management", icon: Users, href: "/dashboard/users", roles: ["admin"] as const },
         { id: "analytics", label: "Analytics", icon: TrendingUp, href: "/dashboard/analytics", roles: ["student", "admin"] as const },
+        { id: "productivity", label: "Productivity Report", icon: FileBarChart, href: "/dashboard/productivity", roles: ["student", "admin"] as const },
         { id: "games", label: "Games", icon: Gamepad2, href: "/dashboard/games", roles: ["student", "admin"] as const },
+        { id: "playlist", label: "Sonar Playlist", icon: Music2, href: "/dashboard/playlist", roles: ["student", "admin"] as const },
         { id: "settings", label: "Settings", icon: Settings, href: "/dashboard/settings", roles: ["student", "admin"] as const },
     ]
 
@@ -92,10 +99,37 @@ export function AppSidebar({ userRole, onLogout }: AppSidebarProps) {
 
                 {/* Footer Actions */}
                 <div className="p-4 border-t border-border space-y-2">
-                    <div className="bg-muted/50 rounded-lg p-4 mb-2">
-                        <p className="text-xs font-medium text-foreground">Pro Plan</p>
-                        <p className="text-[10px] text-muted-foreground mt-0.5">Your subscription is active</p>
-                    </div>
+                    {isPlayingAny && (
+                        <div className="bg-primary/10 rounded-lg p-3 mb-2 flex items-center justify-between border border-primary/20">
+                            <div className="flex items-center gap-2 overflow-hidden">
+                                <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0 animate-pulse">
+                                    <Music2 size={12} className={isSpotifyPlaying ? "text-[#1DB954]" : "text-primary"} />
+                                </div>
+                                <div className="flex flex-col truncate">
+                                    <p className="text-xs font-semibold text-foreground truncate">
+                                        {isSpotifyPlaying ? "Spotify Focus" : "Sonar Tracks"}
+                                    </p>
+                                    <p className="text-[10px] text-muted-foreground">Playing in background</p>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-1">
+                                <button
+                                    onClick={toggleAllMusic}
+                                    className="p-1.5 hover:bg-primary/20 text-muted-foreground hover:text-primary rounded-md transition-colors"
+                                    title="Play/Pause"
+                                >
+                                     {isPlayingAny ? <Pause size={14} className="fill-current" /> : <Play size={14} className="fill-current" />}
+                                </button>
+                                <button
+                                    onClick={stopAllMusic}
+                                    className="p-1.5 hover:bg-destructive/10 text-muted-foreground hover:text-destructive rounded-md transition-colors"
+                                    title="Stop Music"
+                                >
+                                    <X size={14} />
+                                </button>
+                            </div>
+                        </div>
+                    )}
                     <button
                         onClick={onLogout}
                         className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors text-sm font-medium"

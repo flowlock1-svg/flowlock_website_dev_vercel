@@ -32,7 +32,7 @@ export function DashboardLayout({ user, onLogout }: { user: AuthUser; onLogout: 
         return <DashboardHome user={user} lastFocusSession={lastFocusSession} />
       case "study":
         if (user.role === "student") {
-          return <StudySession user={user} onSessionComplete={setLastFocusSession} />
+          return <StudySession user={user} />
         } else {
           return (
             <div className="text-center py-12">

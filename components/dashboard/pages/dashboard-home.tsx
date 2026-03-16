@@ -18,8 +18,27 @@ import {
   AreaChart,
   CartesianGrid,
 } from "recharts"
+import { Sparkles } from "lucide-react"
 import { useEffect, useState } from "react"
 import { supabase } from "@/utils/supabase/client"
+
+const MOTIVATIONAL_QUOTES = [
+  { text: "The secret of getting ahead is getting started.", author: "Mark Twain" },
+  { text: "It always seems impossible until it's done.", author: "Nelson Mandela" },
+  { text: "Don't watch the clock; do what it does. Keep going.", author: "Sam Levenson" },
+  { text: "Success is the sum of small efforts, repeated day in and day out.", author: "Robert Collier" },
+  { text: "Believe you can and you're halfway there.", author: "Theodore Roosevelt" },
+  { text: "You don't have to be great to start, but you have to start to be great.", author: "Zig Ziglar" },
+  { text: "The only way to do great work is to love what you do.", author: "Steve Jobs" },
+  { text: "Energy and persistence conquer all things.", author: "Benjamin Franklin" },
+  { text: "Small progress is still progress. Keep going.", author: "Unknown" },
+  { text: "Your future is created by what you do today, not tomorrow.", author: "Robert Kiyosaki" },
+  { text: "Hard work beats talent when talent doesn't work hard.", author: "Tim Notke" },
+  { text: "A little progress each day adds up to big results.", author: "Satya Nani" },
+  { text: "Focus on being productive instead of busy.", author: "Tim Ferriss" },
+  { text: "The expert in anything was once a beginner.", author: "Helen Hayes" },
+  { text: "You are capable of more than you know.", author: "E.O. Wilson" },
+]
 
 interface DashboardHomeProps {
   user: AuthUser
@@ -56,7 +75,6 @@ function msToMinutes(ms: number) {
 export function DashboardHome({ user, lastFocusSession }: DashboardHomeProps) {
   const [isLoading, setIsLoading] = useState(true)
   const [dailyData, setDailyData] = useState<any[]>([])
-  const [weeklyData, setWeeklyData] = useState<any[]>([])
   const [totalStudyMs, setTotalStudyMs] = useState(0)
   const [avgFocusScore, setAvgFocusScore] = useState(0)
   const [totalSessions, setTotalSessions] = useState(0)
@@ -65,88 +83,66 @@ export function DashboardHome({ user, lastFocusSession }: DashboardHomeProps) {
   const [totalFocusedMs, setTotalFocusedMs] = useState(0)
   const [totalDistractedMs, setTotalDistractedMs] = useState(0)
   const [streakDays, setStreakDays] = useState(0)
+  const [motivationalQuote, setMotivationalQuote] = useState<{ text: string; author: string } | null>(null)
+
+  // Pick a daily-rotating quote if the pref is enabled
+  useEffect(() => {
+    if (typeof localStorage !== "undefined" && localStorage.getItem("pref_motivational_messages") === "true") {
+      const dayIndex = Math.floor(Date.now() / (1000 * 60 * 60 * 24))
+      setMotivationalQuote(MOTIVATIONAL_QUOTES[dayIndex % MOTIVATIONAL_QUOTES.length])
+    }
+  }, [])
 
   useEffect(() => {
     async function fetchData() {
       setIsLoading(true)
       try {
-        // Fetch daily stats for the last 7 days
-        const sevenDaysAgo = new Date()
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+        // Fetch last 7 days of sessions
+        const now = new Date()
+        const sevenDaysAgo = new Date(now)
+        sevenDaysAgo.setDate(now.getDate() - 6)
+        sevenDaysAgo.setHours(0, 0, 0, 0)
 
-        const { data: daily } = await supabase
-          .from("daily_stats")
-          .select("*")
-          .eq("user_id", user.id)
-          .gte("day", sevenDaysAgo.toISOString().split("T")[0])
-          .order("day", { ascending: true })
-
-        // Fetch weekly stats for the last 4 weeks
-        const fourWeeksAgo = new Date()
-        fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28)
-
-        const { data: weekly } = await supabase
-          .from("weekly_stats")
-          .select("*")
-          .eq("user_id", user.id)
-          .gte("week_start", fourWeeksAgo.toISOString().split("T")[0])
-          .order("week_start", { ascending: true })
-
-        // Fetch overall stats
-        const { data: allSessions } = await supabase
+        const { data: recentSessions } = await supabase
           .from("study_sessions")
-          .select("duration_ms, focus_score, focused_time_ms, drowsy_count, head_turned_count, face_missing_count, started_at")
+          .select("started_at, duration_ms, focus_score")
           .eq("user_id", user.id)
-          .order("started_at", { ascending: false })
+          .gte("started_at", sevenDaysAgo.toISOString())
+          .order("started_at", { ascending: true })
 
-        if (allSessions && allSessions.length > 0) {
-          const totalMs = allSessions.reduce((sum: number, s: any) => sum + s.duration_ms, 0)
-          const avgScore = Math.round(allSessions.reduce((sum: number, s: any) => sum + s.focus_score, 0) / allSessions.length)
-          const totalFocused = allSessions.reduce((sum: number, s: any) => sum + (s.focused_time_ms || 0), 0)
-          const totalDistracted = totalMs - totalFocused
-          const distractions = allSessions.reduce((sum: number, s: any) => sum + s.drowsy_count + s.head_turned_count + s.face_missing_count, 0)
+        // Build daily bar chart data for last 7 days
+        const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+        const days: any[] = []
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date(now)
+          d.setDate(now.getDate() - i)
+          days.push({
+            day: DAY_LABELS[d.getDay()],
+            date: d.toDateString(),
+            focusMin: 0,
+            sessions: 0,
+            totalScore: 0,
+            avgScore: 0,
+          })
+        }
 
-          setTotalStudyMs(totalMs)
-          setAvgFocusScore(avgScore)
-          setTotalSessions(allSessions.length)
-          setAvgSessionMs(Math.round(totalMs / allSessions.length))
-          setTotalDistractions(distractions)
-          setTotalFocusedMs(totalFocused)
-          setTotalDistractedMs(totalDistracted)
-
-          // Calculate streak (consecutive days with sessions)
-          const uniqueDays = new Set(allSessions.map((s: any) => new Date(s.started_at).toISOString().split("T")[0]))
-          let streak = 0
-          const today = new Date()
-          for (let i = 0; i < 365; i++) {
-            const d = new Date(today)
-            d.setDate(d.getDate() - i)
-            const key = d.toISOString().split("T")[0]
-            if (uniqueDays.has(key)) {
-              streak++
-            } else if (i > 0) {
-              break
-            }
+        if (recentSessions) {
+          for (const s of recentSessions) {
+            if (!s.started_at) continue
+            const sessionDate = new Date(s.started_at).toDateString()
+            const dayEntry = days.find(d => d.date === sessionDate)
+            if (!dayEntry) continue
+            const dur = typeof s.duration_ms === 'number' ? s.duration_ms : 0
+            const score = typeof s.focus_score === 'number' ? s.focus_score : 0
+            dayEntry.focusMin += Math.round(dur / 60000)
+            dayEntry.sessions += 1
+            dayEntry.totalScore += score
           }
-          setStreakDays(streak)
+          for (const d of days) {
+            if (d.sessions > 0) d.avgScore = Math.round(d.totalScore / d.sessions)
+          }
         }
-
-        // Format daily data
-        const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
-        if (daily && daily.length > 0) {
-          setDailyData(daily.map((d: any) => ({
-            day: dayNames[new Date(d.day + "T12:00:00").getDay()],
-            focus: msToMinutes(d.total_duration_ms),
-          })))
-        }
-
-        // Format weekly data
-        if (weekly && weekly.length > 0) {
-          setWeeklyData(weekly.map((w: any, i: number) => ({
-            week: `Week ${i + 1}`,
-            hours: msToHours(w.total_duration_ms),
-          })))
-        }
+        setDailyData(days)
       } catch (e) {
         console.error("Failed to fetch dashboard data:", e)
       } finally {
@@ -191,6 +187,22 @@ export function DashboardHome({ user, lastFocusSession }: DashboardHomeProps) {
           Here's your study performance overview.
         </p>
       </div>
+
+      {/* Daily Motivational Quote */}
+      {motivationalQuote && (
+        <Card className="bg-gradient-to-r from-primary/10 via-violet-500/10 to-primary/5 border-primary/20 overflow-hidden">
+          <CardContent className="p-5 flex items-center gap-4">
+            <div className="h-10 w-10 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
+              <Sparkles size={20} className="text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold text-primary mb-1 uppercase tracking-wider">Daily Motivation</p>
+              <p className="text-foreground font-medium leading-snug">"{motivationalQuote.text}"</p>
+              <p className="text-xs text-muted-foreground mt-1">— {motivationalQuote.author}</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Last Focus Session Banner */}
       {lastFocusSession && (
@@ -296,45 +308,7 @@ export function DashboardHome({ user, lastFocusSession }: DashboardHomeProps) {
 
       {/* Charts Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Daily Focus Chart */}
-        <Card>
-          <CardHeader className="p-6 pb-2">
-            <CardTitle className="text-base font-semibold">Weekly Focus Pattern</CardTitle>
-          </CardHeader>
-          <CardContent className="p-6 min-h-[300px]">
-            {dailyData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={dailyData} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
-                  <XAxis
-                    dataKey="day"
-                    stroke="#888888"
-                    fontSize={12}
-                    tickLine={false}
-                    axisLine={false}
-                  />
-                  <YAxis
-                    stroke="#888888"
-                    fontSize={12}
-                    tickLine={false}
-                    axisLine={false}
-                    tickFormatter={(value) => `${value}m`}
-                  />
-                  <Tooltip content={<CustomTooltip />} cursor={{ fill: "transparent" }} />
-                  <Bar
-                    dataKey="focus"
-                    fill="currentColor"
-                    radius={[4, 4, 0, 0]}
-                    className="fill-primary"
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex items-center justify-center h-[300px] text-muted-foreground text-sm">
-                Complete a focus session to see your weekly pattern
-              </div>
-            )}
-          </CardContent>
-        </Card>
+
 
         {/* Productivity Distribution */}
         <Card>
@@ -387,50 +361,42 @@ export function DashboardHome({ user, lastFocusSession }: DashboardHomeProps) {
           </CardContent>
         </Card>
 
-        {/* Monthly Trend */}
-        <Card className="lg:col-span-2">
+        {/* Daily Report */}
+        <Card>
           <CardHeader className="p-6 pb-2">
-            <CardTitle className="text-base font-semibold">Monthly Study Trend</CardTitle>
+            <CardTitle className="text-base font-semibold">Daily Study Report</CardTitle>
           </CardHeader>
           <CardContent className="p-6 min-h-[300px]">
-            {weeklyData.length > 0 ? (
+            {dailyData.some(d => d.focusMin > 0) ? (
               <ResponsiveContainer width="100%" height={300}>
-                <AreaChart data={weeklyData} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="colorHours" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="var(--primary)" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
+                <BarChart data={dailyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" opacity={0.4} />
-                  <XAxis
-                    dataKey="week"
-                    stroke="#888888"
-                    fontSize={12}
-                    tickLine={false}
-                    axisLine={false}
+                  <XAxis dataKey="day" stroke="#888888" fontSize={12} tickLine={false} axisLine={false} />
+                  <YAxis stroke="#888888" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(v) => `${Math.round(v / 60)}h`} />
+                  <Tooltip
+                    content={({ active, payload, label }) => {
+                      if (active && payload && payload.length) {
+                        const d = payload[0].payload
+                        const dur = typeof d.focusMin === 'number' && !isNaN(d.focusMin) ? d.focusMin : 0
+                        const sesh = typeof d.sessions === 'number' && !isNaN(d.sessions) ? d.sessions : 0
+                        return (
+                          <div className="bg-popover border border-border p-3 rounded-lg shadow-lg">
+                            <p className="text-sm font-medium text-popover-foreground">{d.date}</p>
+                            <p className="text-sm text-foreground">{Math.floor(dur / 60)}h {dur % 60}m</p>
+                            <p className="text-xs text-muted-foreground">{sesh} session{sesh !== 1 ? 's' : ''}</p>
+                          </div>
+                        )
+                      }
+                      return null
+                    }}
+                    cursor={{ fill: "var(--muted)", opacity: 0.2 }}
                   />
-                  <YAxis
-                    stroke="#888888"
-                    fontSize={12}
-                    tickLine={false}
-                    axisLine={false}
-                    tickFormatter={(value) => `${value}h`}
-                  />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Area
-                    type="monotone"
-                    dataKey="hours"
-                    stroke="var(--primary)"
-                    strokeWidth={2}
-                    fillOpacity={1}
-                    fill="url(#colorHours)"
-                  />
-                </AreaChart>
+                  <Bar dataKey="focusMin" fill="var(--primary)" radius={[4, 4, 0, 0]} />
+                </BarChart>
               </ResponsiveContainer>
             ) : (
               <div className="flex items-center justify-center h-[300px] text-muted-foreground text-sm">
-                Complete sessions across multiple weeks to see your study trend
+                Complete sessions this week to see your daily breakdown
               </div>
             )}
           </CardContent>

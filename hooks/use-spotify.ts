@@ -1,0 +1,270 @@
+"use client"
+
+import { useState, useEffect, useCallback, useRef } from "react"
+
+const CLIENT_ID = process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID!
+const SCOPES = [
+  "playlist-read-private",
+  "playlist-read-collaborative",
+  "user-library-read",
+  "user-read-private",
+  "user-read-email",
+].join(" ")
+
+const SK = {
+  accessToken: "sp_access_token",
+  refreshToken: "sp_refresh_token",
+  expiresAt: "sp_expires_at",
+  codeVerifier: "sp_code_verifier",
+  cachedUser: "sp_cached_user",
+  cachedPlaylists: "sp_cached_playlists",
+}
+
+// ─── PKCE helpers ─────────────────────────────────────────────────────────────
+function generateRandomString(length: number): string {
+  const possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+  const values = crypto.getRandomValues(new Uint8Array(length))
+  return Array.from(values).map((x) => possible[x % possible.length]).join("")
+}
+
+async function generateCodeChallenge(verifier: string): Promise<string> {
+  const data = new TextEncoder().encode(verifier)
+  const digest = await crypto.subtle.digest("SHA-256", data)
+  return btoa(String.fromCharCode(...new Uint8Array(digest)))
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
+}
+
+// ─── Types ─────────────────────────────────────────────────────────────────────
+export interface SpotifyPlaylist {
+  id: string
+  name: string
+  description: string | null
+  images: { url: string }[]
+  tracks: { total: number }
+  owner: { display_name: string }
+  uri: string
+}
+
+export interface SpotifyTrack {
+  id: string
+  name: string
+  artists: { name: string }[]
+  album: { name: string; images: { url: string }[] }
+  duration_ms: number
+  uri: string
+  preview_url: string | null
+  external_urls: { spotify: string }
+}
+
+export interface SpotifyUser {
+  id: string
+  display_name: string
+  email: string
+  images: { url: string }[]
+}
+
+// ─── Low-level: get a fresh token (refresh if expired) ───────────────────────
+async function getToken(): Promise<string | null> {
+  const stored = localStorage.getItem(SK.accessToken)
+  const expiresAt = Number(localStorage.getItem(SK.expiresAt) || 0)
+
+  if (stored && Date.now() < expiresAt) return stored
+
+  // Try refresh
+  const refreshToken = localStorage.getItem(SK.refreshToken)
+  if (!refreshToken) return null
+
+  try {
+    const res = await fetch("/api/spotify/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    const newExpiresAt = Date.now() + (data.expires_in - 60) * 1000
+    localStorage.setItem(SK.accessToken, data.access_token)
+    localStorage.setItem(SK.expiresAt, String(newExpiresAt))
+    if (data.refresh_token) localStorage.setItem(SK.refreshToken, data.refresh_token)
+    return data.access_token
+  } catch {
+    return null
+  }
+}
+
+// ─── Low-level: call Spotify API ──────────────────────────────────────────────
+async function callSpotify(endpoint: string): Promise<any | null> {
+  const token = await getToken()
+  if (!token) {
+    console.warn("[Spotify] No valid token for", endpoint)
+    return null
+  }
+  const res = await fetch(`https://api.spotify.com/v1${endpoint}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) {
+    console.error("[Spotify] API error", res.status, endpoint)
+    return null
+  }
+  return res.json()
+}
+
+// ─── Main hook ─────────────────────────────────────────────────────────────────
+export function useSpotify() {
+  const [isLoggedIn, setIsLoggedIn] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+
+  // Pre-load from cache immediately — avoids blank screen on return
+  const [user, setUser] = useState<SpotifyUser | null>(() => {
+    if (typeof window === "undefined") return null
+    try { return JSON.parse(localStorage.getItem(SK.cachedUser) || "null") } catch { return null }
+  })
+  const [myPlaylists, setMyPlaylists] = useState<SpotifyPlaylist[]>(() => {
+    if (typeof window === "undefined") return []
+    try { return JSON.parse(localStorage.getItem(SK.cachedPlaylists) || "[]") } catch { return [] }
+  })
+  const [playlistsLoading, setPlaylistsLoading] = useState(false)
+  const fetchedRef = useRef(false) // prevent double-fetch on StrictMode
+
+  // ─── Initialise session ───────────────────────────────────────────────────
+  useEffect(() => {
+    const init = async () => {
+      setIsLoading(true)
+
+      // 1. Check for OAuth callback tokens in URL (highest priority)
+      const params = new URLSearchParams(window.location.search)
+      const atParam = params.get("access_token")
+      const rtParam = params.get("refresh_token")
+      const exParam = params.get("expires_in")
+
+      if (atParam && rtParam && exParam) {
+        const expiresAt = Date.now() + (Number(exParam) - 60) * 1000
+        localStorage.setItem(SK.accessToken, atParam)
+        localStorage.setItem(SK.refreshToken, rtParam)
+        localStorage.setItem(SK.expiresAt, String(expiresAt))
+        window.history.replaceState({}, "", window.location.pathname)
+        setIsLoggedIn(true)
+        setIsLoading(false)
+        return
+      }
+
+      const errParam = params.get("spotify_error")
+      if (errParam) {
+        console.error("[Spotify] OAuth error:", errParam)
+        window.history.replaceState({}, "", window.location.pathname)
+        setIsLoading(false)
+        return
+      }
+
+      // 2. Try to restore from localStorage (existing session)
+      const token = await getToken()
+      if (token) {
+        setIsLoggedIn(true)
+      }
+      setIsLoading(false)
+    }
+    init()
+  }, []) // runs once on mount
+
+  // ─── Fetch user + playlists once logged in ────────────────────────────────
+  useEffect(() => {
+    if (!isLoggedIn) return
+    if (fetchedRef.current) return
+    fetchedRef.current = true
+
+    // Fetch user profile (use cache if available)
+    if (!user) {
+      callSpotify("/me").then((data) => {
+        if (data) {
+          setUser(data)
+          localStorage.setItem(SK.cachedUser, JSON.stringify(data))
+        }
+      })
+    }
+
+    // Fetch playlists — show spinner only if no cache
+    const hasCached = myPlaylists.length > 0
+    if (!hasCached) setPlaylistsLoading(true)
+
+    callSpotify("/me/playlists?limit=50").then((data) => {
+      if (data?.items) {
+        setMyPlaylists(data.items)
+        localStorage.setItem(SK.cachedPlaylists, JSON.stringify(data.items))
+      } else if (!hasCached) {
+        // API returned null — token might truly be invalid, clear auth
+        console.warn("[Spotify] Failed to fetch playlists, clearing session")
+        clearAll()
+      }
+      setPlaylistsLoading(false)
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoggedIn])
+
+  // ─── Clear all Spotify data ───────────────────────────────────────────────
+  const clearAll = useCallback(() => {
+    Object.values(SK).forEach((k) => localStorage.removeItem(k))
+    setIsLoggedIn(false)
+    setUser(null)
+    setMyPlaylists([])
+    fetchedRef.current = false
+  }, [])
+
+  // ─── Login ────────────────────────────────────────────────────────────────
+  const login = useCallback(async () => {
+    const verifier = generateRandomString(128)
+    const challenge = await generateCodeChallenge(verifier)
+    localStorage.setItem(SK.codeVerifier, verifier)
+    document.cookie = `spotify_code_verifier=${verifier}; path=/; max-age=600; SameSite=Lax`
+
+    const redirectUri = `${window.location.protocol}//${window.location.host}/api/spotify/callback`
+    const params = new URLSearchParams({
+      client_id: CLIENT_ID,
+      response_type: "code",
+      redirect_uri: redirectUri,
+      code_challenge_method: "S256",
+      code_challenge: challenge,
+      scope: SCOPES,
+    })
+    window.location.href = `https://accounts.spotify.com/authorize?${params}`
+  }, [])
+
+  const logout = useCallback(() => clearAll(), [clearAll])
+
+  // ─── Manual refresh playlists ─────────────────────────────────────────────
+  const fetchMyPlaylists = useCallback(async (): Promise<SpotifyPlaylist[]> => {
+    setPlaylistsLoading(true)
+    const data = await callSpotify("/me/playlists?limit=50")
+    const items: SpotifyPlaylist[] = data?.items ?? []
+    if (items.length > 0) {
+      setMyPlaylists(items)
+      localStorage.setItem(SK.cachedPlaylists, JSON.stringify(items))
+    }
+    setPlaylistsLoading(false)
+    return items
+  }, [])
+
+  // ─── Search ───────────────────────────────────────────────────────────────
+  const searchSpotify = useCallback(async (query: string): Promise<{
+    tracks: SpotifyTrack[]
+    playlists: SpotifyPlaylist[]
+  }> => {
+    if (!query.trim()) return { tracks: [], playlists: [] }
+    const data = await callSpotify(`/search?q=${encodeURIComponent(query)}&type=track,playlist&limit=10`)
+    return {
+      tracks: data?.tracks?.items ?? [],
+      playlists: data?.playlists?.items?.filter(Boolean) ?? [],
+    }
+  }, [])
+
+  return {
+    isLoggedIn,
+    isLoading,
+    user,
+    myPlaylists,
+    playlistsLoading,
+    login,
+    logout,
+    fetchMyPlaylists,
+    searchSpotify,
+  }
+}
