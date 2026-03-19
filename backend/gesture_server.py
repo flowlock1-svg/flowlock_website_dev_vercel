@@ -238,6 +238,6 @@ def stop():
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    print("🖐  FlowLock Gesture Server running on http://localhost:5050")
+    print("FlowLock Gesture Server running on http://localhost:5050")
     ensure_model()  # download model at startup if needed
     app.run(host="0.0.0.0", port=5050, debug=False)
