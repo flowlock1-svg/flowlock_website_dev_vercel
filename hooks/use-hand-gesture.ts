@@ -22,6 +22,7 @@ export function useHandGesture(enabled: boolean) {
     })
     const requestRef = useRef<number>(0)
     const landmarkerRef = useRef<HandLandmarker | null>(null)
+    const streamRef = useRef<MediaStream | null>(null)
     const lastClickTimeRef = useRef<number>(0)
     const posRef = useRef({ 
         x: typeof window !== "undefined" ? window.innerWidth / 2 : 0, 
@@ -160,19 +161,44 @@ export function useHandGesture(enabled: boolean) {
                 el.click()
             }
             lastClickTimeRef.current = now
+        } else if (gesture === "RIGHT_CLICK" && now - lastClickTimeRef.current > 400) {
+            const el = document.elementFromPoint(x, y)
+            if (el) {
+                el.dispatchEvent(new MouseEvent('contextmenu', {
+                    bubbles: true,
+                    cancelable: true,
+                    clientX: x,
+                    clientY: y,
+                    button: 2
+                }))
+                
+                // Visual feedback (enlarge slightly)
+                const cursor = document.getElementById('virtual-gesture-cursor')
+                if (cursor) {
+                    cursor.style.transform = 'scale(1.5)'
+                    setTimeout(() => cursor.style.transform = 'scale(1)', 150)
+                }
+            }
+            lastClickTimeRef.current = now
         } else if (gesture === "SCROLL_UP") {
-            window.scrollBy({ top: -20, behavior: "instant" })
+            const mainContent = document.querySelector('main.flex-1.overflow-auto') // The flowlock scroll container
+            if (mainContent) mainContent.scrollBy({ top: -20, behavior: "instant" })
+            else window.scrollBy({ top: -20, behavior: "instant" })
         } else if (gesture === "SCROLL_DOWN") {
-            window.scrollBy({ top: 20, behavior: "instant" })
+            const mainContent = document.querySelector('main.flex-1.overflow-auto')
+            if (mainContent) mainContent.scrollBy({ top: 20, behavior: "instant" })
+            else window.scrollBy({ top: 20, behavior: "instant" })
         }
     }
 
     // Setup webcam feed
     useEffect(() => {
         if (!enabled) {
-            if (videoRef.current && videoRef.current.srcObject) {
-                const tracks = (videoRef.current.srcObject as MediaStream).getTracks()
-                tracks.forEach(track => track.stop())
+            if (streamRef.current) {
+                streamRef.current.getTracks().forEach(track => track.stop())
+                streamRef.current = null
+            }
+            if (videoRef.current) {
                 videoRef.current.srcObject = null
             }
             if (requestRef.current) cancelAnimationFrame(requestRef.current)
@@ -182,6 +208,7 @@ export function useHandGesture(enabled: boolean) {
 
         navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } })
             .then(stream => {
+                streamRef.current = stream
                 if (videoRef.current) {
                     videoRef.current.srcObject = stream
                     videoRef.current.addEventListener("loadeddata", predictWebcam)
@@ -193,6 +220,10 @@ export function useHandGesture(enabled: boolean) {
 
         return () => {
             if (requestRef.current) cancelAnimationFrame(requestRef.current)
+            if (streamRef.current) {
+                streamRef.current.getTracks().forEach(track => track.stop())
+                streamRef.current = null
+            }
             if (videoRef.current) {
                 videoRef.current.removeEventListener("loadeddata", predictWebcam)
             }

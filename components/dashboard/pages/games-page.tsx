@@ -146,24 +146,26 @@ export function GamesPage() {
 
       {gestureEnabled && (
         <>
-          {/* Fixed positioned hidden video prevents Chromium from pausing the MediaStream when page is scrolled */}
-          <video 
-            ref={videoRef} 
-            autoPlay 
-            playsInline 
-            muted 
-            style={{ 
-              position: "fixed", 
-              top: 0, 
-              left: 0, 
-              width: "1px", 
-              height: "1px", 
-              opacity: 0.001, 
-              pointerEvents: "none", 
-              zIndex: -9999,
-              transform: "scaleX(-1)" 
-            }} 
-          />
+          {/* PiP Camera view so Chrome never throttles the video stream */}
+          <div className="fixed bottom-6 right-6 w-40 rounded-xl overflow-hidden shadow-[0_8px_30px_rgb(0,0,0,0.4)] z-[9998] border-2 border-emerald-500/40 bg-black animate-in slide-in-from-bottom-5">
+            <video 
+              ref={videoRef} 
+              autoPlay 
+              playsInline 
+              muted 
+              className="w-full h-auto opacity-70"
+              style={{ transform: "scaleX(-1)" }} 
+            />
+            <div className="absolute top-2 right-2 flex items-center gap-1.5 bg-black/60 backdrop-blur-md px-2 py-0.5 rounded-full">
+              <div className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-emerald-500 animate-pulse' : 'bg-yellow-500 animate-pulse'}`} />
+              <span className="text-[10px] font-medium text-white shadow-sm">
+                {isActive ? 'Tracking' : 'Searching'}
+              </span>
+            </div>
+            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-2 text-center pointer-events-none">
+              <span className="text-[10px] text-emerald-400 font-semibold tracking-widest uppercase">Web-Native</span>
+            </div>
+          </div>
           <div
             id="virtual-gesture-cursor"
             style={{
