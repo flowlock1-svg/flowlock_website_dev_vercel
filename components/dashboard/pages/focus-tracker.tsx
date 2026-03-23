@@ -67,7 +67,7 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
     // Noise detection hook
     const { noiseState, startNoise, stopNoise, setAlertCallback } = useNoiseDetector()
     const { user } = useAuth()
-    const { startFocusSession, stopFocusSession, setFocusElapsed, isFocusActive, targetDuration, focusElapsed } = useFocus()
+    const { startFocusSession, stopFocusSession, setFocusElapsed, isFocusActive, targetDuration, focusElapsed, setLastFocusSession } = useFocus()
     const { completeSession } = usePomodoro()
     const router = useRouter()
     const {
@@ -701,8 +701,10 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
             onSessionComplete(sessionResult)
         }
 
-        // Extremely important: Forcefully route back to this tracker so they don't miss the PDF and graphs
-        router.push("/dashboard/focus")
+        // Update the dashboard instantly with this session
+        setLastFocusSession(sessionResult)
+        // Route to the productivity report for automatic sync & review
+        router.push("/dashboard/productivity?autoSync=true")
     }, [onSessionComplete, router])
 
     const handleDownloadReport = useCallback(async () => {

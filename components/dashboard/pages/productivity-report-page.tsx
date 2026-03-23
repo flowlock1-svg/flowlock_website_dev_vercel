@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
+import { useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import {
@@ -225,6 +226,9 @@ async function fetchAWDataForDate(dateStr: string): Promise<{
 
 export function ProductivityReportPage() {
     const { user } = useAuth()
+    const searchParams = useSearchParams()
+    const autoSync = searchParams.get("autoSync")
+    const hasAutoSynced = useRef(false)
     const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split("T")[0])
     const [report, setReport] = useState<ReportData | null>(null)
     const [loading, setLoading] = useState(true)
@@ -270,6 +274,13 @@ export function ProductivityReportPage() {
     useEffect(() => {
         fetchReport()
     }, [fetchReport])
+
+    useEffect(() => {
+        if (autoSync === "true" && awStatus === "online" && !hasAutoSynced.current) {
+            hasAutoSynced.current = true
+            handleFetchFromAW()
+        }
+    }, [autoSync, awStatus])
 
     /* ── on-demand fetch from AW ─────────────────────────────── */
 
