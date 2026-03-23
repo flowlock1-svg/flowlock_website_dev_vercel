@@ -22,7 +22,7 @@ function chunkText(text: string, maxSize = 4000): string[] {
 
     // Fall back to the last sentence-ending punctuation followed by a space
     if (breakIdx === -1 || breakIdx < maxSize * 0.3) {
-      const sentenceMatch = slice.match(/.*[.!?]\s/s);
+      const sentenceMatch = slice.match(/[\s\S]*[.!?]\s/);
       if (sentenceMatch) {
         breakIdx = sentenceMatch[0].length;
       }

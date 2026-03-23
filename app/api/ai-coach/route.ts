@@ -67,7 +67,11 @@ Translate this timeline into human-readable zones. Return EXACTLY a JSON object 
       }
     });
 
-    const outputText = result.text.trim();
+    const rawText = result.text ?? "";
+    if (!rawText) {
+      return NextResponse.json({ error: "AI returned an empty response" }, { status: 500 });
+    }
+    const outputText = rawText.trim();
     return NextResponse.json(JSON.parse(outputText));
 
   } catch (error: any) {

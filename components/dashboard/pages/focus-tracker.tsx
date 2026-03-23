@@ -13,6 +13,7 @@ import { usePomodoro } from "@/components/providers/pomodoro-provider"
 import { supabase } from "@/utils/supabase/client"
 import { toast } from "sonner"
 import { useFaceAuth } from "@/hooks/use-face-auth"
+import { useFocus } from "@/components/providers/focus-provider"
 
 // Session result data passed to parent
 export interface FocusSessionResult {
@@ -98,6 +99,9 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
     const isUnauthorizedRef = useRef<boolean>(false)
     const processDetectionRef = useRef<(faceLandmarks: any[], ctx: CanvasRenderingContext2D) => void>(() => { })
     const authenticateFaceRef = useRef(authenticateFace)
+
+    // Track whether a PDF report has already been auto-downloaded for this session
+    const hasDownloadedRef = useRef(false)
 
     // Fix: Keep a live ref to the targetDuration so the internal setInterval never reads stale closure data
     const targetDurationRef = useRef<number | null>(targetDuration)
