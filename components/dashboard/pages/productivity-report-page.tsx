@@ -14,6 +14,7 @@ import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
     ResponsiveContainer, PieChart, Pie, Cell, Legend
 } from "recharts"
+import AIInsightsPanel from "./ai-insights-panel"
 
 /* ── types ─────────────────────────────────────────────────── */
 
@@ -818,6 +819,14 @@ export default function ProductivityReportPage() {
                     </CardContent>
                 </Card>
             )}
+
+            {/* AI Productivity Analysis */}
+            <AIInsightsPanel
+                reportData={report ? {
+                    top_apps: report.top_apps,
+                    top_websites: report.top_websites,
+                } : null}
+            />
         </div>
     )
 }

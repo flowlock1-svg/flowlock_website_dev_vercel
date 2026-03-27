@@ -18,7 +18,7 @@ import {
   AreaChart,
   CartesianGrid,
 } from "recharts"
-import { Sparkles } from "lucide-react"
+import { Sparkles, Brain } from "lucide-react"
 import { useEffect, useState } from "react"
 import { supabase } from "@/utils/supabase/client"
 
@@ -89,6 +89,8 @@ export default function DashboardHome() {
   const [totalDistractedMs, setTotalDistractedMs] = useState(0)
   const [streakDays, setStreakDays] = useState(0)
   const [motivationalQuote, setMotivationalQuote] = useState<{ text: string; author: string } | null>(null)
+  const [aiQuickTip, setAiQuickTip] = useState<string | null>(null)
+  const [aiTipLoading, setAiTipLoading] = useState(false)
 
   if (!user) return null
 
@@ -99,6 +101,26 @@ export default function DashboardHome() {
       setMotivationalQuote(MOTIVATIONAL_QUOTES[dayIndex % MOTIVATIONAL_QUOTES.length])
     }
   }, [])
+
+  // Fetch AI quick tip when a focus session just ended
+  useEffect(() => {
+    if (!lastFocusSession || !user) return
+    setAiTipLoading(true)
+    setAiQuickTip(null)
+    fetch("/api/ai-coach", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "quick_tip",
+        userName: user.name,
+        session: lastFocusSession,
+      }),
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data?.tip) setAiQuickTip(data.tip) })
+      .catch(() => null)
+      .finally(() => setAiTipLoading(false))
+  }, [lastFocusSession, user])
 
   useEffect(() => {
     async function fetchData() {
@@ -253,6 +275,29 @@ export default function DashboardHome() {
               </div>
             </div>
             <CheckCircle2 size={24} className="text-emerald-500 flex-shrink-0 opacity-50" />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* AI Quick Tip (after session) */}
+      {lastFocusSession && (
+        <Card className="border-violet-500/20 bg-gradient-to-r from-violet-500/5 via-purple-500/5 to-transparent overflow-hidden">
+          <div className="h-0.5 w-full bg-gradient-to-r from-violet-500 to-indigo-500" />
+          <CardContent className="p-4 flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-violet-500/15 flex-shrink-0">
+              {aiTipLoading
+                ? <Loader2 size={16} className="text-violet-400 animate-spin" />
+                : <Brain size={16} className="text-violet-400" />}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] font-semibold text-violet-400 uppercase tracking-wider mb-0.5">AI Quick Tip</p>
+              {aiTipLoading
+                ? <div className="h-3.5 w-56 rounded bg-muted/40 animate-pulse" />
+                : aiQuickTip
+                  ? <p className="text-sm text-foreground leading-snug">{aiQuickTip}</p>
+                  : <p className="text-sm text-muted-foreground">Available after your next session.</p>}
+            </div>
+            <Sparkles size={14} className="text-violet-400/50 flex-shrink-0" />
           </CardContent>
         </Card>
       )}

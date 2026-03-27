@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Download, Clock, Target, Flame, TrendingUp, Loader2 } from "lucide-react"
 import { supabase } from "@/utils/supabase/client"
 import { useAuth } from "@/components/providers/auth-provider"
+import AIInsightsPanel from "./ai-insights-panel"
 import {
   BarChart,
   Bar,
@@ -18,7 +19,7 @@ import {
   Line,
 } from "recharts"
 
-type Period = "Daily" | "Weekly" | "Monthly" | "Yearly"
+type Period = "Daily" | "Weekly" | "Monthly" | "Yearly" | "AI Insights"
 
 /* ── stat card ─────────────────────────────────────────────── */
 
@@ -748,13 +749,16 @@ export default function AnalyticsPage() {
 
       {/* Period Filters */}
       <div className="flex gap-2 flex-wrap">
-        {(["Daily", "Weekly", "Monthly", "Yearly"] as Period[]).map((p) => (
+        {(["Daily", "Weekly", "Monthly", "Yearly", "AI Insights"] as Period[]).map((p) => (
           <button
             key={p}
             onClick={() => setPeriod(p)}
-            className={`px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${period === p
-              ? "bg-primary text-primary-foreground border-primary"
-              : "border-border hover:bg-muted"
+            className={`px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${
+              period === p
+                ? p === "AI Insights"
+                  ? "bg-violet-600 text-white border-violet-600"
+                  : "bg-primary text-primary-foreground border-primary"
+                : "border-border hover:bg-muted"
               }`}
           >
             {p}
@@ -767,6 +771,7 @@ export default function AnalyticsPage() {
       {period === "Weekly" && <WeeklyView userId={user.id} />}
       {period === "Monthly" && <MonthlyView userId={user.id} />}
       {period === "Yearly" && <YearlyView userId={user.id} />}
+      {period === "AI Insights" && <AIInsightsPanel />}
 
       {/* Export Options */}
       <Card className="bg-card border-border">
