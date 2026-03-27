@@ -44,7 +44,7 @@ const CONFIG = {
 }
 
 type DetectionStatus = "FOCUSED" | "DROWSY" | "HEAD_TURNED" | "FACE_MISSING" | "UNAUTHORIZED"
-type Phase = "ready" | "enroll" | "active" | "results"
+type Phase = "ready" | "enroll" | "active" | "break" | "results"
 
 export function FocusTracker({ onSessionComplete, visible = true }: FocusTrackerProps) {
     const [phase, setPhase] = useState<Phase>("ready")
@@ -650,7 +650,7 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
         }
 
         setResult(sessionResult)
-        setPhase("results")
+        setPhase("break")
 
         // Call Pomodoro completion logic
         // If there was a target duration, use it (converted to mins). Else use actual duration.
@@ -720,33 +720,95 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
             const { default: autoTable } = await import("jspdf-autotable")
             const doc = new jsPDF()
 
-            // Header
-            doc.setFontSize(22)
-            doc.setTextColor(0, 0, 0)
-            doc.text("Focus Session Report", 14, 20)
+            // Grade helper
+            const grade = sessionData.score >= 85 ? { label: "A — Excellent", color: [22, 163, 74] as [number,number,number] }
+                : sessionData.score >= 70 ? { label: "B — Good", color: [37, 99, 235] as [number,number,number] }
+                : sessionData.score >= 50 ? { label: "C — Average", color: [217, 119, 6] as [number,number,number] }
+                : { label: "D — Needs Improvement", color: [220, 38, 38] as [number,number,number] }
 
-            // Essential Metrics
-            doc.setFontSize(12)
-            doc.text(`Focus Score: ${sessionData.score}%`, 14, 30)
-            doc.text(`Total Duration: ${formatTime(sessionData.duration)}`, 14, 38)
-            doc.text(`Focused Time: ${formatTime(sessionData.focusedTime)}`, 14, 46)
+            const fmtMs = (ms: number) => {
+                const totalSec = Math.round(ms / 1000)
+                const h = Math.floor(totalSec / 3600)
+                const m = Math.floor((totalSec % 3600) / 60)
+                const s = totalSec % 60
+                return h > 0 ? `${h}h ${m}m ${s}s` : m > 0 ? `${m}m ${s}s` : `${s}s`
+            }
 
-            // Detailed Metrics Table
+            // ── HEADER ──────────────────────────────────────────
+            doc.setFillColor(88, 28, 135)
+            doc.rect(0, 0, 210, 28, "F")
+            doc.setFontSize(20)
+            doc.setTextColor(255, 255, 255)
+            doc.setFont("helvetica", "bold")
+            doc.text("FlowLock · Focus Session Report", 14, 18)
+
+            // Date
+            doc.setFontSize(9)
+            doc.setFont("helvetica", "normal")
+            doc.setTextColor(220, 220, 255)
+            doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 25)
+
+            // Grade badge
+            doc.setFontSize(14)
+            doc.setFont("helvetica", "bold")
+            doc.setTextColor(...grade.color)
+            doc.text(`Performance Grade: ${grade.label}`, 14, 42)
+
+            // Core metrics
+            doc.setFontSize(11)
+            doc.setFont("helvetica", "normal")
+            doc.setTextColor(50, 50, 50)
+            doc.text(`Focus Score: ${sessionData.score}%`, 14, 52)
+            doc.text(`Total Duration: ${fmtMs(sessionData.duration)}`, 14, 60)
+            doc.text(`Focused Time: ${fmtMs(sessionData.focusedTime)}`, 14, 68)
+
+            // ── DISTRACTION TABLE ────────────────────────────────
+            const distractionCounts = [
+                { type: "Drowsiness", count: sessionData.drowsyCount, ms: sessionData.drowsyTime },
+                { type: "Head Turned Away", count: sessionData.headTurnedCount, ms: sessionData.headTurnedTime },
+                { type: "Face Not Detected", count: sessionData.faceMissingCount, ms: sessionData.faceMissingTime },
+                { type: "Unauthorized Person", count: sessionData.unauthorizedCount, ms: sessionData.unauthorizedTime },
+                { type: "High Noise Interruptions", count: sessionData.highNoiseCount, ms: 0 },
+            ]
+
             autoTable(doc, {
-                startY: 55,
-                head: [["Metric", "Count", "Time"]],
-                body: [
-                    ["Drowsy Events", sessionData.drowsyCount.toString(), formatTime(sessionData.drowsyTime)],
-                    ["Head Turned Events", sessionData.headTurnedCount.toString(), formatTime(sessionData.headTurnedTime)],
-                    ["Face Missing Events", sessionData.faceMissingCount.toString(), formatTime(sessionData.faceMissingTime)],
-                    ["Unauthorized User Events", sessionData.unauthorizedCount.toString(), formatTime(sessionData.unauthorizedTime)],
-                    ["High Noise Events", sessionData.highNoiseCount.toString(), "-"],
-                ],
+                startY: 76,
+                head: [["Distraction Type", "Events", "Time Lost", "Impact"]],
+                body: distractionCounts.map(d => {
+                    const pct = sessionData.duration > 0 && d.ms > 0 ? `${Math.round((d.ms / sessionData.duration) * 100)}%` : "—"
+                    return [d.type, d.count.toString(), d.ms > 0 ? fmtMs(d.ms) : "—", pct]
+                }),
                 theme: "grid",
-                headStyles: { fillColor: [88, 28, 135] }, // primary purple-ish
+                headStyles: { fillColor: [88, 28, 135], textColor: [255, 255, 255] },
+                alternateRowStyles: { fillColor: [248, 245, 255] },
             })
 
-            doc.save("focus_report.pdf")
+            // ── KEY INSIGHTS ─────────────────────────────────────
+            const finalY = (doc as any).lastAutoTable.finalY + 12
+            doc.setFontSize(13)
+            doc.setFont("helvetica", "bold")
+            doc.setTextColor(88, 28, 135)
+            doc.text("Key Insights", 14, finalY)
+
+            const insights: string[] = []
+            // Biggest distraction
+            const biggest = distractionCounts.filter(d => d.type !== "High Noise Interruptions").sort((a, b) => b.ms - a.ms)[0]
+            if (biggest && biggest.count > 0) insights.push(`⚠ Most common issue: ${biggest.type} (${biggest.count} event${biggest.count !== 1 ? "s" : ""})`)
+            if (sessionData.score >= 80) insights.push("🌟 Outstanding session — you maintained elite-level concentration.")
+            else if (sessionData.score >= 60) insights.push("👍 Good session. Reducing " + (biggest?.type?.toLowerCase() ?? "distractions") + " will push you to the next level.")
+            else insights.push("💡 Tip: Try working in a quieter space and disable phone notifications.")
+            // Focused time quality
+            const focusPct = sessionData.duration > 0 ? Math.round((sessionData.focusedTime / sessionData.duration) * 100) : 0
+            insights.push(`🎯 You spent ${focusPct}% of your session in pure focus.`)
+
+            doc.setFontSize(10)
+            doc.setFont("helvetica", "normal")
+            doc.setTextColor(60, 60, 60)
+            insights.forEach((line, i) => {
+                doc.text(line, 14, finalY + 10 + i * 8)
+            })
+
+            doc.save(`flowlock_session_${new Date().toISOString().split('T')[0]}.pdf`)
         } catch (error) {
             console.error("Failed to generate PDF:", error)
         }
@@ -1036,13 +1098,13 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
                                     </CardHeader>
                                     <CardContent className="space-y-3">
                                         {[
-                                            { label: "Status", value: metrics.status, id: "status" },
-                                            { label: "Doze Timer", value: metrics.doze, id: "doze" },
-                                            { label: "Face Timer", value: metrics.face, id: "face" },
-                                            { label: "Head Timer", value: metrics.head, id: "head" },
-                                            { label: "Unauthorized", value: metrics.unauth, id: "unauth" },
-                                            { label: "EAR", value: metrics.ear, id: "ear" },
-                                            { label: "Yaw", value: metrics.yaw, id: "yaw" },
+                                            { label: "Detection Status", value: metrics.status, id: "status" },
+                                            { label: "Drowsiness Duration", value: metrics.doze, id: "doze" },
+                                            { label: "Face Away Duration", value: metrics.face, id: "face" },
+                                            { label: "Head Turned Duration", value: metrics.head, id: "head" },
+                                            { label: "Unauthorized Person", value: metrics.unauth, id: "unauth" },
+                                            { label: "Eye Openness (EAR)", value: metrics.ear, id: "ear" },
+                                            { label: "Head Turn Angle", value: metrics.yaw, id: "yaw" },
                                         ].map((m) => (
                                             <div
                                                 key={m.id}
@@ -1158,6 +1220,89 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
                     </div>
                 )}
 
+                {/* ── BREAK PHASE ── */}
+                {phase === "break" && result && (
+                    <div className="animate-in fade-in duration-500 space-y-6 max-w-2xl mx-auto">
+                        {/* Celebration header */}
+                        <div className="text-center space-y-3 py-6">
+                            <div className="text-6xl mb-4">
+                                {result.score >= 80 ? "🎉" : result.score >= 60 ? "👏" : "✅"}
+                            </div>
+                            <h2 className="text-3xl font-bold">
+                                Session Complete!
+                            </h2>
+                            <p className="text-muted-foreground">
+                                {result.score >= 80
+                                    ? "Outstanding focus! You absolutely crushed it."
+                                    : result.score >= 60
+                                    ? "Solid effort! Keep building that consistency."
+                                    : "Every session counts! Rest up and come back stronger."}
+                            </p>
+                        </div>
+
+                        {/* Quick stats */}
+                        <div className="grid grid-cols-3 gap-4">
+                            {[
+                                { label: "Focus Score", value: `${result.score}%`, color: result.score >= 70 ? "text-emerald-500" : "text-amber-500" },
+                                { label: "Duration", value: formatTime(result.duration), color: "text-primary" },
+                                { label: "Distractions", value: `${result.drowsyCount + result.headTurnedCount + result.faceMissingCount + result.unauthorizedCount}`, color: "text-muted-foreground" },
+                            ].map(s => (
+                                <div key={s.label} className="bg-muted/50 rounded-xl p-4 text-center space-y-1">
+                                    <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
+                                    <p className="text-xs text-muted-foreground">{s.label}</p>
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* Break prompt */}
+                        <div className="text-center">
+                            <p className="text-sm text-muted-foreground font-medium">
+                                Your brain deserves a break. What would you like to do?
+                            </p>
+                        </div>
+
+                        {/* 3 action buttons */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            <button
+                                onClick={() => router.push("/dashboard/games")}
+                                className="group flex flex-col items-center gap-3 p-6 rounded-2xl border-2 border-primary/30 bg-primary/5 hover:bg-primary/15 hover:border-primary transition-all duration-200"
+                            >
+                                <span className="text-4xl group-hover:scale-110 transition-transform duration-200">🎮</span>
+                                <span className="font-semibold text-sm text-center">Take me to Games</span>
+                                <span className="text-xs text-muted-foreground text-center">Relax with a quick game</span>
+                            </button>
+
+                            <button
+                                onClick={() => setPhase("results")}
+                                className="group flex flex-col items-center gap-3 p-6 rounded-2xl border-2 border-muted hover:border-muted-foreground bg-muted/30 hover:bg-muted/60 transition-all duration-200"
+                            >
+                                <span className="text-4xl group-hover:scale-110 transition-transform duration-200">⏭</span>
+                                <span className="font-semibold text-sm text-center">Skip the Break</span>
+                                <span className="text-xs text-muted-foreground text-center">View detailed report</span>
+                            </button>
+
+                            <button
+                                onClick={() => router.push("/dashboard/playlist")}
+                                className="group flex flex-col items-center gap-3 p-6 rounded-2xl border-2 border-emerald-500/30 bg-emerald-500/5 hover:bg-emerald-500/15 hover:border-emerald-500 transition-all duration-200"
+                            >
+                                <span className="text-4xl group-hover:scale-110 transition-transform duration-200">🎵</span>
+                                <span className="font-semibold text-sm text-center">Listen Music</span>
+                                <span className="text-xs text-muted-foreground text-center">Chill with your playlist</span>
+                            </button>
+                        </div>
+
+                        {/* Or start new session */}
+                        <div className="text-center">
+                            <button
+                                onClick={() => setPhase("ready")}
+                                className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-4 transition-colors"
+                            >
+                                No break needed — start a new session
+                            </button>
+                        </div>
+                    </div>
+                )}
+
                 {/* ── RESULTS PHASE ── */}
                 {phase === "results" && result && (
                     <div className="animate-in fade-in duration-300 space-y-6 max-w-2xl mx-auto">
@@ -1241,24 +1386,20 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
 
                                 {/* Divider & Actions */}
                                 <div className="pt-4 border-t border-border space-y-4">
-                                    <div className="flex flex-col items-center justify-center gap-1">
-                                        <p className="text-sm font-medium text-muted-foreground uppercase tracking-widest text-center">
-                                            Session Complete!
-                                        </p>
-                                        <p className="text-xs text-muted-foreground text-center">
-                                            Would you like to play some games to unwind and relax your brain?
-                                        </p>
-                                    </div>
-                                    <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                                    <div className="flex flex-col sm:flex-row gap-3 justify-center flex-wrap">
                                         <Button onClick={() => router.push("/dashboard/games")} className="gap-2 bg-primary hover:bg-primary/90 text-primary-foreground">
                                             <Gamepad2 size={18} />
-                                            Yes, take me to Games!
+                                            Take me to Games
+                                        </Button>
+                                        <Button onClick={() => router.push("/dashboard/playlist")} variant="outline" className="gap-2 bg-transparent border-emerald-500/50 text-emerald-500 hover:bg-emerald-500/10">
+                                            <Mic size={18} />
+                                            Listen Music
                                         </Button>
                                         <Button variant="outline" onClick={() => setPhase("ready")} className="gap-2 bg-transparent">
                                             <RotateCcw size={18} />
-                                            No, Start New Session
+                                            New Session
                                         </Button>
-                                        <Button variant="default" onClick={handleDownloadReport} className="gap-2">
+                                        <Button variant="secondary" onClick={handleDownloadReport} className="gap-2">
                                             <Download size={18} />
                                             Download Report
                                         </Button>

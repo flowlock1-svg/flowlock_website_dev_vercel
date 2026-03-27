@@ -198,7 +198,7 @@ export default function DashboardHome() {
       <div className="flex flex-col gap-1">
         <h1 className="text-3xl font-bold tracking-tight text-foreground">Welcome back, {user.name}</h1>
         <p className="text-muted-foreground">
-          Here's your study performance overview.
+          Here&apos;s your study performance overview.
         </p>
       </div>
 
@@ -227,17 +227,28 @@ export default function DashboardHome() {
             </div>
             <div className="flex-1 space-y-1">
               <p className="font-medium text-foreground">Latest Focus Session</p>
-              <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                <span className="flex items-center gap-1.5">
-                  Score: <span className="font-bold text-emerald-500">{lastFocusSession.score}%</span>
+              <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+                <span className="flex items-center gap-1">
+                  Score: <span className={`font-bold ${lastFocusSession.score >= 80 ? 'text-emerald-500' : lastFocusSession.score >= 60 ? 'text-amber-500' : 'text-red-500'}`}>{lastFocusSession.score}%</span>
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ml-1 ${
+                    lastFocusSession.score >= 85 ? 'bg-emerald-500/20 text-emerald-500' :
+                    lastFocusSession.score >= 70 ? 'bg-blue-500/20 text-blue-500' :
+                    lastFocusSession.score >= 50 ? 'bg-amber-500/20 text-amber-500' :
+                    'bg-red-500/20 text-red-500'
+                  }`}>{lastFocusSession.score >= 85 ? 'A' : lastFocusSession.score >= 70 ? 'B' : lastFocusSession.score >= 50 ? 'C' : 'D'}</span>
                 </span>
                 <span className="w-1 h-1 rounded-full bg-border" />
                 <span>
-                  Duration: {Math.floor(lastFocusSession.duration / 60000)}m {Math.floor((lastFocusSession.duration / 1000) % 60)}s
+                  {Math.floor(lastFocusSession.duration / 60000)}m {Math.floor((lastFocusSession.duration / 1000) % 60)}s
                 </span>
                 <span className="w-1 h-1 rounded-full bg-border" />
-                <span>
-                  {lastFocusSession.drowsyCount + lastFocusSession.headTurnedCount + lastFocusSession.faceMissingCount} distraction events
+                <span title={`Drowsy: ${lastFocusSession.drowsyCount} · Head turned: ${lastFocusSession.headTurnedCount} · Face missing: ${lastFocusSession.faceMissingCount}`}>
+                  {lastFocusSession.drowsyCount + lastFocusSession.headTurnedCount + lastFocusSession.faceMissingCount} distractions
+                  {lastFocusSession.drowsyCount + lastFocusSession.headTurnedCount + lastFocusSession.faceMissingCount > 0 && (
+                    <span className="text-xs text-muted-foreground/70 ml-1">
+                      ({lastFocusSession.drowsyCount > 0 ? `${lastFocusSession.drowsyCount} drowsy` : ''}{lastFocusSession.headTurnedCount > 0 ? `${lastFocusSession.drowsyCount > 0 ? ', ' : ''}${lastFocusSession.headTurnedCount} turned` : ''}{lastFocusSession.faceMissingCount > 0 ? `${(lastFocusSession.drowsyCount > 0 || lastFocusSession.headTurnedCount > 0) ? ', ' : ''}${lastFocusSession.faceMissingCount} missing` : ''})
+                    </span>
+                  )}
                 </span>
               </div>
             </div>
@@ -253,7 +264,12 @@ export default function DashboardHome() {
             <p className="text-sm font-medium text-muted-foreground">Total Study Time</p>
             <div className="space-y-1">
               <p className="text-3xl font-bold tracking-tight text-foreground">
-                {totalStudyMs > 0 ? `${msToHours(totalStudyMs)}h` : "0h"}
+                {totalStudyMs > 0
+                  ? (() => {
+                      const totalMin = Math.round(totalStudyMs / 60000)
+                      return totalMin >= 60 ? `${Math.floor(totalMin / 60)}h ${totalMin % 60}m` : `${totalMin}m`
+                    })()
+                  : "0m"}
               </p>
               <p className="text-xs font-medium text-muted-foreground">
                 {totalSessions} session{totalSessions !== 1 ? "s" : ""}
@@ -266,9 +282,23 @@ export default function DashboardHome() {
           <CardContent className="p-6 space-y-2">
             <p className="text-sm font-medium text-muted-foreground">Average Focus</p>
             <div className="space-y-1">
-              <p className="text-3xl font-bold tracking-tight text-foreground">
-                {lastFocusSession ? `${lastFocusSession.score}%` : avgFocusScore > 0 ? `${avgFocusScore}%` : "—"}
-              </p>
+              <div className="flex items-center gap-2">
+                <p className="text-3xl font-bold tracking-tight text-foreground">
+                  {lastFocusSession ? `${lastFocusSession.score}%` : avgFocusScore > 0 ? `${avgFocusScore}%` : "—"}
+                </p>
+                {(lastFocusSession?.score ?? avgFocusScore) > 0 && (
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                    (lastFocusSession?.score ?? avgFocusScore) >= 85 ? 'bg-emerald-500/20 text-emerald-500' :
+                    (lastFocusSession?.score ?? avgFocusScore) >= 70 ? 'bg-blue-500/20 text-blue-500' :
+                    (lastFocusSession?.score ?? avgFocusScore) >= 50 ? 'bg-amber-500/20 text-amber-500' :
+                    'bg-red-500/20 text-red-500'
+                  }`}>
+                    {(lastFocusSession?.score ?? avgFocusScore) >= 85 ? 'Excellent' :
+                     (lastFocusSession?.score ?? avgFocusScore) >= 70 ? 'Good' :
+                     (lastFocusSession?.score ?? avgFocusScore) >= 50 ? 'Average' : 'Needs Work'}
+                  </span>
+                )}
+              </div>
               <p className="text-xs font-medium text-emerald-500">
                 {lastFocusSession ? "From last session" : avgFocusScore > 0 ? "Lifetime average" : "No data yet"}
               </p>
@@ -298,9 +328,18 @@ export default function DashboardHome() {
                   ? lastFocusSession.drowsyCount + lastFocusSession.headTurnedCount + lastFocusSession.faceMissingCount
                   : totalDistractions > 0 ? totalDistractions : "—"}
               </p>
-              <p className="text-xs font-medium text-muted-foreground">
-                {lastFocusSession ? "Last session" : "All time"}
-              </p>
+              {lastFocusSession && (lastFocusSession.drowsyCount + lastFocusSession.headTurnedCount + lastFocusSession.faceMissingCount > 0) ? (
+                <p className="text-xs font-medium text-muted-foreground">
+                  {[lastFocusSession.drowsyCount > 0 ? `${lastFocusSession.drowsyCount} drowsy` : null,
+                    lastFocusSession.headTurnedCount > 0 ? `${lastFocusSession.headTurnedCount} head-turn` : null,
+                    lastFocusSession.faceMissingCount > 0 ? `${lastFocusSession.faceMissingCount} face-miss` : null,
+                  ].filter(Boolean).join(' · ')}
+                </p>
+              ) : (
+                <p className="text-xs font-medium text-muted-foreground">
+                  {lastFocusSession ? "Last session" : "All time"}
+                </p>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -354,21 +393,28 @@ export default function DashboardHome() {
                   </ResponsiveContainer>
                   <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                     <span className="text-3xl font-bold text-foreground">{productivePercent}%</span>
-                    <span className="text-xs text-muted-foreground uppercase tracking-wider">Productive</span>
+                    <span className="text-xs text-muted-foreground uppercase tracking-wider">Focused</span>
                   </div>
                 </div>
-                {/* Legend */}
-                <div className="space-y-2 min-w-[120px]">
+                {/* Legend with % values */}
+                <div className="space-y-3 min-w-[140px]">
                   {productivityData.map((item) => (
-                    <div key={item.name} className="flex items-center gap-2 text-sm">
-                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
-                      <span className="text-muted-foreground">{item.name}</span>
+                    <div key={item.name} className="space-y-0.5">
+                      <div className="flex items-center gap-2 text-sm">
+                        <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: item.color }} />
+                        <span className="text-muted-foreground">{item.name}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-3 flex-shrink-0" />
+                        <span className="text-sm font-bold" style={{ color: item.color }}>{item.value}%</span>
+                      </div>
                     </div>
                   ))}
                 </div>
               </>
             ) : (
-              <div className="flex items-center justify-center h-[300px] text-muted-foreground text-sm">
+              <div className="flex flex-col items-center justify-center h-[300px] text-muted-foreground text-sm gap-3">
+                <span className="text-4xl opacity-30">📊</span>
                 Complete a focus session to see your productivity breakdown
               </div>
             )}
@@ -386,18 +432,24 @@ export default function DashboardHome() {
                 <BarChart data={dailyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" opacity={0.4} />
                   <XAxis dataKey="day" stroke="#888888" fontSize={12} tickLine={false} axisLine={false} />
-                  <YAxis stroke="#888888" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(v) => `${Math.round(v / 60)}h`} />
+                  <YAxis stroke="#888888" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(v) =>
+                    v >= 60 ? `${Math.floor(v / 60)}h` : `${v}m`
+                  } />
                   <Tooltip
                     content={({ active, payload, label }) => {
                       if (active && payload && payload.length) {
                         const d = payload[0].payload
                         const dur = typeof d.focusMin === 'number' && !isNaN(d.focusMin) ? d.focusMin : 0
                         const sesh = typeof d.sessions === 'number' && !isNaN(d.sessions) ? d.sessions : 0
+                        const avg = typeof d.avgScore === 'number' && !isNaN(d.avgScore) ? d.avgScore : 0
+                        const hh = Math.floor(dur / 60)
+                        const mm = dur % 60
                         return (
-                          <div className="bg-popover border border-border p-3 rounded-lg shadow-lg">
+                          <div className="bg-popover border border-border p-3 rounded-lg shadow-lg space-y-1">
                             <p className="text-sm font-medium text-popover-foreground">{d.date}</p>
-                            <p className="text-sm text-foreground">{Math.floor(dur / 60)}h {dur % 60}m</p>
+                            <p className="text-sm text-foreground">{hh > 0 ? `${hh}h ` : ''}{mm}m studied</p>
                             <p className="text-xs text-muted-foreground">{sesh} session{sesh !== 1 ? 's' : ''}</p>
+                            {avg > 0 && <p className="text-xs font-medium text-primary">Avg focus: {avg}%</p>}
                           </div>
                         )
                       }
@@ -409,7 +461,8 @@ export default function DashboardHome() {
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <div className="flex items-center justify-center h-[300px] text-muted-foreground text-sm">
+              <div className="flex flex-col items-center justify-center h-[300px] text-muted-foreground text-sm gap-3">
+                <span className="text-4xl opacity-30">📅</span>
                 Complete sessions this week to see your daily breakdown
               </div>
             )}
