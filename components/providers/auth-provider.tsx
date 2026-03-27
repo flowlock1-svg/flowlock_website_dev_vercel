@@ -143,23 +143,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return { error: "Missing database configuration. Please add Supabase environment variables to Vercel and redeploy." }
         }
 
-        const timeoutPromise = new Promise<any>((_, reject) => 
-            setTimeout(() => reject(new Error("Network timeout: Supabase connection was blocked or dropped. If the database was asleep, it may take up to 60s to wake up. Please try again.")), 45000)
-        )
-
         try {
-            const { data, error } = await Promise.race([
-                supabase.auth.signInWithPassword({ email, password }),
-                timeoutPromise
-            ])
+            const { data, error } = await supabase.auth.signInWithPassword({ email, password })
 
             if (error) return { error: error.message }
 
             if (data.session?.user) {
-                const profile = await Promise.race([
-                    fetchProfile(data.session.user),
-                    timeoutPromise
-                ])
+                const profile = await fetchProfile(data.session.user)
                 if (profile) {
                     setUser(profile)
                     setIsAuthenticated(true)
@@ -191,30 +181,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return { error: "Missing database configuration. Please add Supabase environment variables to Vercel and redeploy." }
         }
 
-        const timeoutPromise = new Promise<any>((_, reject) => 
-            setTimeout(() => reject(new Error("Network timeout: Supabase connection was blocked or dropped. If the database was asleep, it may take up to 60s to wake up. Please try again.")), 45000)
-        )
-
         try {
-            const { data, error } = await Promise.race([
-                supabase.auth.signUp({
-                    email,
-                    password,
-                    options: {
-                        data: { full_name: name, role: "student" },
-                        emailRedirectTo: `${window.location.origin}/dashboard`,
-                    },
-                }),
-                timeoutPromise
-            ])
+            const { data, error } = await supabase.auth.signUp({
+                email,
+                password,
+                options: {
+                    data: { full_name: name, role: "student" },
+                    emailRedirectTo: `${window.location.origin}/dashboard`,
+                },
+            })
 
             if (error) return { error: error.message }
 
             if (data.session?.user) {
-                const profile = await Promise.race([
-                    fetchProfile(data.session.user),
-                    timeoutPromise
-                ])
+                const profile = await fetchProfile(data.session.user)
                 if (profile) {
                     setUser(profile)
                     setIsAuthenticated(true)
