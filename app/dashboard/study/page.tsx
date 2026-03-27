@@ -1,5 +1,7 @@
 "use client"
 
+export const dynamic = 'force-dynamic'
+
 import { StudySession } from "@/components/dashboard/pages/study-session"
 import { useAuth } from "@/components/providers/auth-provider"
 import { useFocus } from "@/components/providers/focus-provider"

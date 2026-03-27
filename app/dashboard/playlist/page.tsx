@@ -1,5 +1,7 @@
 "use client"
 
+export const dynamic = 'force-dynamic'
+
 import { useEffect, useRef, useState, useCallback } from "react"
 import { useSpotify, type SpotifyPlaylist, type SpotifyTrack } from "@/hooks/use-spotify"
 import { useGoogle, type YouTubePlaylist, type YouTubeTrack } from "@/hooks/use-google"

@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 export const metadata = {
     title: "Devices & Apps | FlowLock Dashboard",
     description: "Monitor active devices, apps, and browser usage.",

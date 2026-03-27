@@ -1,5 +1,7 @@
 "use client"
 
+export const dynamic = 'force-dynamic'
+
 import { AdminPanel } from "@/components/dashboard/pages/admin-panel"
 import { useAuth } from "@/components/providers/auth-provider"
 
