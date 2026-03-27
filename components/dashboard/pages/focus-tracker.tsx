@@ -706,13 +706,15 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
 
         // Update the dashboard instantly with this session
         setLastFocusSession(sessionResult)
-        // Route to the productivity report for automatic sync & review & download
-        router.push("/dashboard/productivity?autoSync=true&autoDownload=true")
+        
+        // Generate the PDF report
+        await generateAndDownloadPDF(sessionResult)
+
+        // Route to the dashboard so stats are updated visually
+        // (Removing router.push here so the user can see the detailed "results" phase on the focus tracker page instead)
     }, [onSessionComplete, router, setLastFocusSession])
 
-    const handleDownloadReport = useCallback(async () => {
-        if (!result) return
-
+    const generateAndDownloadPDF = async (sessionData: FocusSessionResult) => {
         try {
             const { default: jsPDF } = await import("jspdf")
             const { default: autoTable } = await import("jspdf-autotable")
@@ -725,20 +727,20 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
 
             // Essential Metrics
             doc.setFontSize(12)
-            doc.text(`Focus Score: ${result.score}%`, 14, 30)
-            doc.text(`Total Duration: ${formatTime(result.duration)}`, 14, 38)
-            doc.text(`Focused Time: ${formatTime(result.focusedTime)}`, 14, 46)
+            doc.text(`Focus Score: ${sessionData.score}%`, 14, 30)
+            doc.text(`Total Duration: ${formatTime(sessionData.duration)}`, 14, 38)
+            doc.text(`Focused Time: ${formatTime(sessionData.focusedTime)}`, 14, 46)
 
             // Detailed Metrics Table
             autoTable(doc, {
                 startY: 55,
                 head: [["Metric", "Count", "Time"]],
                 body: [
-                    ["Drowsy Events", result.drowsyCount.toString(), formatTime(result.drowsyTime)],
-                    ["Head Turned Events", result.headTurnedCount.toString(), formatTime(result.headTurnedTime)],
-                    ["Face Missing Events", result.faceMissingCount.toString(), formatTime(result.faceMissingTime)],
-                    ["Unauthorized User Events", result.unauthorizedCount.toString(), formatTime(result.unauthorizedTime)],
-                    ["High Noise Events", result.highNoiseCount.toString(), "-"],
+                    ["Drowsy Events", sessionData.drowsyCount.toString(), formatTime(sessionData.drowsyTime)],
+                    ["Head Turned Events", sessionData.headTurnedCount.toString(), formatTime(sessionData.headTurnedTime)],
+                    ["Face Missing Events", sessionData.faceMissingCount.toString(), formatTime(sessionData.faceMissingTime)],
+                    ["Unauthorized User Events", sessionData.unauthorizedCount.toString(), formatTime(sessionData.unauthorizedTime)],
+                    ["High Noise Events", sessionData.highNoiseCount.toString(), "-"],
                 ],
                 theme: "grid",
                 headStyles: { fillColor: [88, 28, 135] }, // primary purple-ish
@@ -748,7 +750,12 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
         } catch (error) {
             console.error("Failed to generate PDF:", error)
         }
-    }, [result, formatTime])
+    }
+
+    const handleDownloadReport = useCallback(async () => {
+        if (!result) return
+        await generateAndDownloadPDF(result)
+    }, [result])
 
     // Render chart when results phase is entered
     useEffect(() => {
@@ -790,16 +797,8 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
                     }
                 },
             })
-
-            // Auto-generate PDF report once per session
-            if (!hasDownloadedRef.current) {
-                hasDownloadedRef.current = true;
-                setTimeout(() => {
-                    handleDownloadReport();
-                }, 500); // Small delay to let UI render completely first
-            }
         }
-    }, [phase, result, handleDownloadReport])
+    }, [phase, result])
 
     // Cleanup on unmount
     useEffect(() => {
