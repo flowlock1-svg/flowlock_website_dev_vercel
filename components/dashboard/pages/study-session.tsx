@@ -315,7 +315,7 @@ function WheelPicker({
 // ─── Main component ───────────────────────────────────────────────────────────
 export function StudySession({ user }: { user: AuthUser }) {
   const { settings, updateSettings } = usePomodoro()
-  const { startFocusSession } = useFocus()
+  const { setTargetDuration } = useFocus()
   const router = useRouter()
 
   const [localSettings, setLocalSettings] = useState(settings)
@@ -339,7 +339,7 @@ export function StudySession({ user }: { user: AuthUser }) {
   const handleStart = () => {
     if (selectedHours === 0 && selectedMinutes === 0) return
     const totalSeconds = (selectedHours * 3600) + (selectedMinutes * 60)
-    startFocusSession(totalSeconds)
+    setTargetDuration(totalSeconds)
     router.push("/dashboard/focus")
   }
 
@@ -349,7 +349,7 @@ export function StudySession({ user }: { user: AuthUser }) {
   }
 
   const handleQuickStart = (minutes: number) => {
-    startFocusSession(minutes * 60)
+    setTargetDuration(minutes * 60)
     router.push("/dashboard/focus")
   }
 

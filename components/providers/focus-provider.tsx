@@ -58,6 +58,7 @@ interface FocusContextType {
     focusElapsed: number
     targetDuration: number | null
     setFocusElapsed: (seconds: number) => void
+    setTargetDuration: (duration: number | null) => void
     startFocusSession: (targetDuration?: number) => void
     stopFocusSession: () => void
 
@@ -317,6 +318,7 @@ export function FocusProvider({ children }: { children: ReactNode }) {
             focusElapsed,
             targetDuration,
             setFocusElapsed,
+            setTargetDuration,
             startFocusSession,
             stopFocusSession,
             

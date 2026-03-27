@@ -898,14 +898,25 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
                                         </Button>
                                     ) : (
                                         <div className="flex flex-col sm:flex-row gap-3 items-center justify-center">
-                                            <Button
-                                                size="lg"
-                                                onClick={() => router.push("/dashboard/study")}
-                                                className="gap-2 text-base px-8"
-                                            >
-                                                <Play size={20} />
-                                                Start Focus Session
-                                            </Button>
+                                            {targetDuration ? (
+                                                <Button
+                                                    size="lg"
+                                                    onClick={handleStart}
+                                                    className="gap-2 text-base px-8"
+                                                >
+                                                    <Play size={20} />
+                                                    Start Focus Session
+                                                </Button>
+                                            ) : (
+                                                <Button
+                                                    size="lg"
+                                                    onClick={() => router.push("/dashboard/study")}
+                                                    className="gap-2 text-base px-8"
+                                                >
+                                                    <Play size={20} />
+                                                    Set Timer & Start
+                                                </Button>
+                                            )}
                                             <Button
                                                 size="lg"
                                                 variant="outline"
