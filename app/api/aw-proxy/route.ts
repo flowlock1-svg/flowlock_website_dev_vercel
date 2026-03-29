@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 
-const AW_LOCAL = "http://localhost:5600/api/0"
+const AW_LOCAL = "http://127.0.0.1:5600/api/0"
 
 export async function GET(req: NextRequest) {
     const endpoint = req.nextUrl.searchParams.get("endpoint") || "buckets"

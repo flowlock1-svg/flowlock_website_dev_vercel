@@ -11,7 +11,7 @@
  * Both paths are tried so the feature works in all environments.
  */
 
-const AW_DIRECT = "http://localhost:5600/api/0"
+const AW_DIRECT = "http://127.0.0.1:5600/api/0"
 
 /** Fetch an ActivityWatch API endpoint. Returns parsed JSON or throws. */
 export async function awFetch(endpoint: string): Promise<any> {
