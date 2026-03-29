@@ -9,11 +9,11 @@ import Script from "next/script"
 import type { FaceLandmarker as FaceLandmarkerType } from "@mediapipe/tasks-vision"
 import { useNoiseDetector } from "@/hooks/use-noise-detector"
 import { useAuth } from "@/components/providers/auth-provider"
+import { useFocus } from "@/components/providers/focus-provider"
 import { usePomodoro } from "@/components/providers/pomodoro-provider"
 import { supabase } from "@/utils/supabase/client"
 import { toast } from "sonner"
 import { useFaceAuth } from "@/hooks/use-face-auth"
-import { useFocus } from "@/components/providers/focus-provider"
 
 // Session result data passed to parent
 export interface FocusSessionResult {
@@ -67,8 +67,8 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
     // Noise detection hook
     const { noiseState, startNoise, stopNoise, setAlertCallback } = useNoiseDetector()
     const { user } = useAuth()
-    const { startFocusSession, stopFocusSession, setFocusElapsed, isFocusActive, targetDuration, focusElapsed, setLastFocusSession } = useFocus()
-    const { completeSession } = usePomodoro()
+    const { startFocusSession, isFocusActive, focusElapsed, targetDuration, setFocusElapsed, stopFocusSession, setLastFocusSession } = useFocus()
+    const { updateBreakState, completeSession } = usePomodoro()
     const router = useRouter()
     const {
         loadModels,
@@ -479,7 +479,7 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
                     displaySec = remaining
                     if (remaining <= 0) {
                         // Auto-stop when target is reached
-                        handleStop()
+                        handleStopRef.current()
                         return
                     }
                 }
@@ -656,6 +656,9 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
         // If there was a target duration, use it (converted to mins). Else use actual duration.
         const intendedDurationMins = targetDuration ? targetDuration / 60 : totalDuration / 60000
         completeSession(intendedDurationMins)
+
+        // Force hide the auto-popup break overlay so our custom results phase is visible!
+        updateBreakState(false)
 
         // Signal to provider that session ended
         stopFocusSession()
@@ -1300,7 +1303,10 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
                                     <h3 className="text-center font-medium text-muted-foreground mb-6">What would you like to do next?</h3>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                                         <button
-                                            onClick={() => router.push("/dashboard/study")}
+                                            onClick={() => {
+                                                updateBreakState(true);
+                                                // Optional: force it to skip prompt if you add that state later
+                                            }}
                                             className="group flex flex-col items-center gap-3 p-6 rounded-2xl border-2 border-orange-500/30 bg-orange-500/5 hover:bg-orange-500/15 hover:border-orange-500 transition-all duration-200"
                                         >
                                             <span className="flex items-center justify-center w-12 h-12 rounded-full bg-orange-500/10 text-orange-500 group-hover:scale-110 transition-transform duration-200">
