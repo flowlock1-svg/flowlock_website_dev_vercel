@@ -135,6 +135,25 @@ Return EXACTLY this JSON with NO markdown:
   "tip": "One single sentence (max 20 words) of actionable advice specific to their session data."
 }`;
 
+    } else if (type === "daily_insight") {
+      if (!sessions || !Array.isArray(sessions)) {
+        return NextResponse.json({ error: "Invalid sessions data" }, { status: 400 });
+      }
+      const last7 = sessions.slice(-7).map((s: any) => ({
+        date: s.started_at ? new Date(s.started_at).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }) : "unknown",
+        time_of_day: s.started_at ? (() => { const h = new Date(s.started_at).getHours(); return h < 12 ? "morning" : h < 17 ? "afternoon" : "evening" })() : "unknown",
+        duration_min: Math.round((s.duration_ms || 0) / 60000),
+        focus_score: s.focus_score || 0,
+        distractions: (s.drowsy_count || 0) + (s.head_turned_count || 0) + (s.face_missing_count || 0),
+      }));
+      prompt = `You are a warm, insightful productivity coach. The user ${userName || "there"} has the following last 7 study sessions:
+${JSON.stringify(last7)}
+
+Generate exactly ONE concise, actionable, personalized study tip (1–2 sentences max). Reference their actual data patterns (e.g. best time of day, focus score trend, distraction spikes). Be encouraging but specific. Sound human and conversational, not robotic.
+
+Return EXACTLY this JSON with NO markdown or code fences:
+{ "insight": "Your 1-2 sentence tip here." }`;
+
     } else {
       return NextResponse.json({ error: "Invalid coach type" }, { status: 400 });
     }

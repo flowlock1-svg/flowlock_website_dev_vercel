@@ -100,6 +100,8 @@ export default function DashboardHome() {
   const [motivationalQuote, setMotivationalQuote] = useState<{ text: string; author: string } | null>(null)
   const [aiQuickTip, setAiQuickTip] = useState<string | null>(null)
   const [aiTipLoading, setAiTipLoading] = useState(false)
+  const [todayInsight, setTodayInsight] = useState<string | null>(null)
+  const [todayInsightLoading, setTodayInsightLoading] = useState(false)
 
   if (!user) return null
 
@@ -360,6 +362,51 @@ export default function DashboardHome() {
 
     fetchData()
   }, [user?.id, lastFocusSession])
+
+  // Fetch Today's Insight (once per day, cached in localStorage)
+  useEffect(() => {
+    if (!user?.id) return
+    const cacheKey = `flowlock_daily_insight_${user.id}_${new Date().toDateString()}`
+    const cached = typeof localStorage !== "undefined" ? localStorage.getItem(cacheKey) : null
+    if (cached) {
+      setTodayInsight(cached)
+      return
+    }
+    const fetchInsight = async () => {
+      setTodayInsightLoading(true)
+      try {
+        const { data: recentSessions } = await supabase
+          .from("study_sessions")
+          .select("started_at, duration_ms, focus_score, drowsy_count, head_turned_count, face_missing_count")
+          .eq("user_id", user.id)
+          .order("started_at", { ascending: false })
+          .limit(7)
+        if (!recentSessions || recentSessions.length === 0) return
+        const res = await fetch("/api/ai-coach", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "daily_insight",
+            userName: user.name,
+            sessions: recentSessions,
+          }),
+        })
+        if (!res.ok) return
+        const data = await res.json()
+        if (data?.insight) {
+          setTodayInsight(data.insight)
+          if (typeof localStorage !== "undefined") {
+            localStorage.setItem(cacheKey, data.insight)
+          }
+        }
+      } catch {
+        // silently fail — insight is non-critical
+      } finally {
+        setTodayInsightLoading(false)
+      }
+    }
+    fetchInsight()
+  }, [user?.id])
 
   // Compute productivity distribution from real data
   const productivePercent = totalStudyMs > 0 ? Math.round((totalFocusedMs / totalStudyMs) * 100) : 0
@@ -705,6 +752,28 @@ export default function DashboardHome() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Today's Insight */}
+      {(todayInsight || todayInsightLoading) && (
+        <div className="flex">
+          <div className="flex-1 bg-gradient-to-r from-violet-500/8 via-purple-500/5 to-transparent border border-violet-500/15 rounded-xl px-5 py-4 flex items-start gap-3.5">
+            <div className="mt-0.5 p-2 rounded-lg bg-violet-500/15 flex-shrink-0">
+              {todayInsightLoading
+                ? <Loader2 size={15} className="text-violet-400 animate-spin" />
+                : <Sparkles size={15} className="text-violet-400" />}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] font-bold text-violet-400 uppercase tracking-widest mb-1">Today's Insight</p>
+              {todayInsightLoading
+                ? <div className="space-y-1.5">
+                    <div className="h-3.5 w-3/4 rounded bg-muted/50 animate-pulse" />
+                    <div className="h-3.5 w-1/2 rounded bg-muted/40 animate-pulse" />
+                  </div>
+                : <p className="text-sm text-foreground leading-relaxed">{todayInsight}</p>}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* This Week / Daily Report */}
       <Card className="bg-card border-border overflow-hidden">
