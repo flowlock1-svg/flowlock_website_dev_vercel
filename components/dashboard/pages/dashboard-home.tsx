@@ -1,7 +1,7 @@
 "use client"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Timer, Eye, CheckCircle2, TrendingUp, Loader2 } from "lucide-react"
+import { Timer, Eye, CheckCircle2, TrendingUp, Loader2, Clock } from "lucide-react"
 import type { AuthUser } from "@/components/providers/auth-provider"
 import type { FocusSessionResult } from "./focus-tracker"
 import {
@@ -466,9 +466,9 @@ export default function DashboardHome() {
       )}
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-7 lg:grid-cols-6 gap-6">
         {/* Personalized Insight Card (Replaces Total Study Time) */}
-        <Card className="md:col-span-2 lg:col-span-2 bg-gradient-to-br from-zinc-900 to-zinc-950 border-emerald-500/20 shadow-md flex flex-col justify-center">
+        <Card className="md:col-span-2 lg:col-span-2 xl:col-span-2 bg-gradient-to-br from-zinc-900 to-zinc-950 border-emerald-500/20 shadow-md flex flex-col justify-center">
           <CardContent className="p-6 space-y-4">
             <div>
               <h2 className="text-2xl font-bold text-emerald-50 mb-1">
@@ -667,6 +667,39 @@ export default function DashboardHome() {
                   </span>
                 )}
               </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Best Study Window */}
+        <Card className="flex flex-col">
+          <CardContent className="p-6 flex-1 flex flex-col justify-between">
+            <div className="space-y-4 mb-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-muted-foreground whitespace-nowrap">Peak Zone</p>
+                <Clock size={16} className="text-violet-500" />
+              </div>
+              <div className="flex items-center gap-2">
+                <p className="text-[1.35rem] font-bold tracking-tight text-foreground leading-none">
+                  {totalSessions >= 3 && bestFocusTimeWindow && bestFocusTimeWindow !== "Not enough data" 
+                    ? bestFocusTimeWindow
+                    : "—"}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-auto pt-2 border-t border-border/50">
+              <p className="text-xs font-medium">
+                {totalSessions < 3 ? (
+                  <span className="text-muted-foreground">
+                    Log 3+ sessions to unlock
+                  </span>
+                ) : (
+                  <span className="text-violet-500 text-[11px] uppercase tracking-wide font-bold">
+                    Peak performance zone
+                  </span>
+                )}
+              </p>
             </div>
           </CardContent>
         </Card>
