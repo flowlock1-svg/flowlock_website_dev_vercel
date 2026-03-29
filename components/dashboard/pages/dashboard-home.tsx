@@ -89,6 +89,7 @@ export default function DashboardHome() {
   const [totalDistractedMs, setTotalDistractedMs] = useState(0)
   const [streakDays, setStreakDays] = useState(0)
   const [insightMessage, setInsightMessage] = useState("Keep building your focus habits! 🚀")
+  const [bestFocusTimeWindow, setBestFocusTimeWindow] = useState("Not enough data")
   const [motivationalQuote, setMotivationalQuote] = useState<{ text: string; author: string } | null>(null)
   const [aiQuickTip, setAiQuickTip] = useState<string | null>(null)
   const [aiTipLoading, setAiTipLoading] = useState(false)
@@ -227,6 +228,36 @@ export default function DashboardHome() {
           else if (i !== 6) break 
         }
         setStreakDays(streak)
+
+        // Best focus time
+        const hourScores: Record<number, {total: number, count: number}> = {}
+        for (const s of allSessions) {
+          if (!s.started_at || typeof s.focus_score !== 'number') continue
+          const h = new Date(s.started_at).getHours()
+          if (!hourScores[h]) hourScores[h] = {total: 0, count: 0}
+          hourScores[h].total += s.focus_score
+          hourScores[h].count++
+        }
+        let bestHour = -1
+        let bestAverage = -1
+        for (const hStr in hourScores) {
+           const h = parseInt(hStr)
+           const avg = hourScores[h].total / hourScores[h].count
+           if (avg > bestAverage && hourScores[h].count > 0) {
+             bestAverage = avg
+             bestHour = h
+           }
+        }
+        if (bestHour !== -1) {
+           const formatHour = (hour: number) => {
+               const ampm = hour >= 12 ? 'PM' : 'AM'
+               const h12 = hour % 12 || 12
+               return `${h12} ${ampm}`
+           }
+           setBestFocusTimeWindow(`${formatHour(bestHour)} – ${formatHour((bestHour + 2) % 24)}`)
+        } else {
+           setBestFocusTimeWindow("Not enough data")
+        }
 
         if (thisWeekMs > lastWeekMs && lastWeekMs > 0) {
           const pct = Math.round(((thisWeekMs - lastWeekMs) / lastWeekMs) * 100)
@@ -385,32 +416,45 @@ export default function DashboardHome() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardContent className="p-6 space-y-2">
-            <p className="text-sm font-medium text-muted-foreground">Average Focus</p>
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <p className="text-3xl font-bold tracking-tight text-foreground">
-                  {lastFocusSession ? `${lastFocusSession.score}%` : avgFocusScore > 0 ? `${avgFocusScore}%` : "—"}
-                </p>
-                {(lastFocusSession?.score ?? avgFocusScore) > 0 && (
-                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-                    (lastFocusSession?.score ?? avgFocusScore) >= 85 ? 'bg-emerald-500/20 text-emerald-500' :
-                    (lastFocusSession?.score ?? avgFocusScore) >= 70 ? 'bg-blue-500/20 text-blue-500' :
-                    (lastFocusSession?.score ?? avgFocusScore) >= 50 ? 'bg-amber-500/20 text-amber-500' :
-                    'bg-red-500/20 text-red-500'
-                  }`}>
-                    {(lastFocusSession?.score ?? avgFocusScore) >= 85 ? 'Excellent' :
-                     (lastFocusSession?.score ?? avgFocusScore) >= 70 ? 'Good' :
-                     (lastFocusSession?.score ?? avgFocusScore) >= 50 ? 'Average' : 'Needs Work'}
-                  </span>
-                )}
+        <Card className="flex flex-col p-6 bg-card border-border">
+          <p className="text-sm font-medium text-muted-foreground w-full text-left mb-6">Average Focus</p>
+          {(() => {
+            const score = lastFocusSession ? lastFocusSession.score : (avgFocusScore > 0 ? avgFocusScore : 0)
+            const colorClass = score >= 70 ? "text-emerald-500" : score >= 40 ? "text-amber-500" : "text-red-500"
+            const strokeColor = score >= 70 ? "#10b981" : score >= 40 ? "#f59e0b" : "#ef4444"
+            const radius = 38
+            const circumference = 2 * Math.PI * radius
+            const offset = score > 0 ? circumference - (score / 100) * circumference : circumference
+
+            return (
+              <div className="flex flex-col items-center w-full flex-1 justify-between">
+                <div className="relative flex items-center justify-center w-32 h-32 mb-4">
+                  <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r="38" className="stroke-muted/30" strokeWidth="8" fill="none" />
+                    <circle 
+                      cx="50" cy="50" r="38" 
+                      stroke={strokeColor} 
+                      strokeWidth="8" 
+                      fill="none" 
+                      strokeLinecap="round"
+                      strokeDasharray={circumference}
+                      strokeDashoffset={offset}
+                      className="transition-all duration-1000 ease-in-out"
+                    />
+                  </svg>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    <span className={`text-3xl font-black tracking-tight ${colorClass}`}>{score > 0 ? `${score}%` : "—"}</span>
+                    <span className="text-[10px] font-bold text-muted-foreground/80 uppercase tracking-widest mt-0.5">Focus Score</span>
+                  </div>
+                </div>
+                <div className="w-full bg-muted/30 rounded-lg p-3 text-center border border-border/50">
+                  <p className="text-xs font-medium text-muted-foreground">
+                    Best focus: <span className="text-foreground font-semibold">{bestFocusTimeWindow}</span>
+                  </p>
+                </div>
               </div>
-              <p className="text-xs font-medium text-emerald-500">
-                {lastFocusSession ? "From last session" : avgFocusScore > 0 ? "Lifetime average" : "No data yet"}
-              </p>
-            </div>
-          </CardContent>
+            )
+          })()}
         </Card>
 
         <Card>
