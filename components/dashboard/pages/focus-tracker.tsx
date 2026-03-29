@@ -362,7 +362,14 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
         if (videoRef.current) {
             videoRef.current.srcObject = stream
             return new Promise<void>((resolve) => {
-                videoRef.current!.onloadedmetadata = () => resolve()
+                videoRef.current!.onloadedmetadata = async () => {
+                    try {
+                        await videoRef.current!.play()
+                    } catch (e) {
+                        console.error("Camera play failed", e)
+                    }
+                    resolve()
+                }
             })
         }
     }, [])
