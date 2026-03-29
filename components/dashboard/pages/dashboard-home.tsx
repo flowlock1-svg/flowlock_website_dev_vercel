@@ -92,6 +92,8 @@ export default function DashboardHome() {
   const [bestFocusTimeWindow, setBestFocusTimeWindow] = useState("Not enough data")
   const [recentSessionDurations, setRecentSessionDurations] = useState<number[]>([])
   const [isSessionTrendUp, setIsSessionTrendUp] = useState(false)
+  const [distractionHourData, setDistractionHourData] = useState<{name: string, value: number}[]>([])
+  const [worstDistractionHour, setWorstDistractionHour] = useState<string | null>(null)
   const [motivationalQuote, setMotivationalQuote] = useState<{ text: string; author: string } | null>(null)
   const [aiQuickTip, setAiQuickTip] = useState<string | null>(null)
   const [aiTipLoading, setAiTipLoading] = useState(false)
@@ -276,6 +278,36 @@ export default function DashboardHome() {
         
         setRecentSessionDurations(durations)
         setIsSessionTrendUp(trendUp)
+
+        // Distractions by hour calculation
+        const hourDistractions = Array(24).fill(0)
+        for (const s of allSessions) {
+          if (!s.started_at) continue
+          const distAmount = (s.drowsy_count || 0) + (s.head_turned_count || 0) + (s.face_missing_count || 0)
+          if (distAmount > 0) {
+             const h = new Date(s.started_at).getHours()
+             hourDistractions[h] += distAmount
+          }
+        }
+        let maxDist = 0
+        let worstH = -1
+        for (let i = 0; i < 24; i++) {
+           if (hourDistractions[i] > maxDist) {
+             maxDist = hourDistractions[i]
+             worstH = i
+           }
+        }
+        let worstLabel = null
+        if (worstH !== -1) {
+            const formatHour = (hour: number) => {
+               const ampm = hour >= 12 ? 'PM' : 'AM'
+               const h12 = hour % 12 || 12
+               return `${h12} ${ampm}`
+           }
+           worstLabel = `${formatHour(worstH)} – ${formatHour((worstH + 1) % 24)}`
+        }
+        setDistractionHourData(hourDistractions.map((val, idx) => ({ name: idx.toString(), value: val })))
+        setWorstDistractionHour(worstLabel)
 
         if (thisWeekMs > lastWeekMs && lastWeekMs > 0) {
           const pct = Math.round(((thisWeekMs - lastWeekMs) / lastWeekMs) * 100)
@@ -515,26 +547,47 @@ export default function DashboardHome() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardContent className="p-6 space-y-2">
-            <p className="text-sm font-medium text-muted-foreground">Distractions</p>
-            <div className="space-y-1">
-              <p className="text-3xl font-bold tracking-tight text-foreground">
-                {lastFocusSession
-                  ? lastFocusSession.drowsyCount + lastFocusSession.headTurnedCount + lastFocusSession.faceMissingCount
-                  : totalDistractions > 0 ? totalDistractions : "—"}
-              </p>
-              {lastFocusSession && (lastFocusSession.drowsyCount + lastFocusSession.headTurnedCount + lastFocusSession.faceMissingCount > 0) ? (
-                <p className="text-xs font-medium text-muted-foreground">
-                  {[lastFocusSession.drowsyCount > 0 ? `${lastFocusSession.drowsyCount} drowsy` : null,
-                    lastFocusSession.headTurnedCount > 0 ? `${lastFocusSession.headTurnedCount} head-turn` : null,
-                    lastFocusSession.faceMissingCount > 0 ? `${lastFocusSession.faceMissingCount} face-miss` : null,
-                  ].filter(Boolean).join(' · ')}
+        <Card className="flex flex-col">
+          <CardContent className="p-6 flex-1 flex flex-col justify-between">
+            <div className="space-y-2 mb-2">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-muted-foreground">Distractions</p>
+              </div>
+              
+              <div className="flex flex-wrap items-baseline gap-2">
+                <p className="text-3xl font-bold tracking-tight text-foreground">
+                  {lastFocusSession
+                    ? lastFocusSession.drowsyCount + lastFocusSession.headTurnedCount + lastFocusSession.faceMissingCount
+                    : totalDistractions > 0 ? totalDistractions : "—"}
                 </p>
+                {worstDistractionHour && !lastFocusSession && (
+                  <span className="text-[10px] font-bold text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded truncate">
+                    Most at {worstDistractionHour}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="h-12 mt-auto w-full -ml-1">
+              {!lastFocusSession && totalDistractions > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={distractionHourData}>
+                    <Bar dataKey="value" fill="#f59e0b" radius={[2, 2, 0, 0]} isAnimationActive={false} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : lastFocusSession ? (
+                <div className="h-full flex items-end">
+                  <p className="text-xs font-medium text-muted-foreground">
+                    {[lastFocusSession.drowsyCount > 0 ? `${lastFocusSession.drowsyCount} drowsy` : null,
+                      lastFocusSession.headTurnedCount > 0 ? `${lastFocusSession.headTurnedCount} head-turn` : null,
+                      lastFocusSession.faceMissingCount > 0 ? `${lastFocusSession.faceMissingCount} face-miss` : null,
+                    ].filter(Boolean).join(' · ') || "No distractions logged yet — great focus!"}
+                  </p>
+                </div>
               ) : (
-                <p className="text-xs font-medium text-muted-foreground">
-                  {lastFocusSession ? "Last session" : "All time"}
-                </p>
+                <div className="h-full flex items-end">
+                  <p className="text-xs font-medium text-emerald-500">No distractions logged yet — great focus!</p>
+                </div>
               )}
             </div>
           </CardContent>
