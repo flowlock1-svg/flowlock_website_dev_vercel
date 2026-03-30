@@ -1,26 +1,10 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
+import { supabase } from "@/utils/supabase/client"
 
-const CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID!
-const SCOPES = [
-  "https://www.googleapis.com/auth/calendar.readonly",
-  "https://www.googleapis.com/auth/calendar.events",
-  "https://www.googleapis.com/auth/youtube.readonly",
-  "openid",
-  "email",
-  "profile",
-].join(" ")
+export type GoogleProvider = 'calendar' | 'youtube'
 
-const GK = {
-  accessToken: "go_access_token",
-  refreshToken: "go_refresh_token",
-  expiresAt: "go_expires_at",
-  cachedUser: "go_cached_user",
-  cachedYTPlaylists: "go_cached_yt_playlists",
-}
-
-// ─── Types ─────────────────────────────────────────────────────────────────────
 export interface GoogleUser {
   id: string
   name: string
@@ -56,243 +40,185 @@ export interface CalendarEvent {
   htmlLink: string
 }
 
-// ─── Low-level: get a fresh token (refresh if expired) ───────────────────────
-async function getToken(): Promise<string | null> {
-  const stored = localStorage.getItem(GK.accessToken)
-  const expiresAt = Number(localStorage.getItem(GK.expiresAt) || 0)
-
-  // Buffer of 60 seconds
-  if (stored && Date.now() < expiresAt) return stored
-
-  // Try refresh
-  const refreshToken = localStorage.getItem(GK.refreshToken)
-  if (!refreshToken) return null
-
-  try {
-    const res = await fetch("/api/google/refresh", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    })
-    if (!res.ok) return null
-    const data = await res.json()
-    const newExpiresAt = Date.now() + (data.expires_in - 60) * 1000
-    localStorage.setItem(GK.accessToken, data.access_token)
-    localStorage.setItem(GK.expiresAt, String(newExpiresAt))
-    if (data.refresh_token) localStorage.setItem(GK.refreshToken, data.refresh_token)
-    return data.access_token
-  } catch {
-    return null
-  }
-}
-
-// ─── Low-level: call Google API ──────────────────────────────────────────────
-async function callGoogle(endpoint: string, options: RequestInit = {}): Promise<any | null> {
-  const token = await getToken()
-  if (!token) {
-    console.warn("[Google] No valid token for", endpoint)
-    return null
-  }
-  
-  const headers = {
-    Authorization: `Bearer ${token}`,
-    "Content-Type": "application/json",
-    ...options.headers,
-  }
-
-  const res = await fetch(endpoint, { ...options, headers })
-  if (!res.ok) {
-    const errText = await res.text()
-    console.error("[Google] API error", res.status, endpoint, errText)
-    return null
-  }
-  
-  // Some endpoints return 204 No Content
-  if (res.status === 204) return true
-  
-  return res.json()
-}
-
-// ─── Main hook ─────────────────────────────────────────────────────────────────
-export function useGoogle() {
+export function useGoogle(provider: GoogleProvider) {
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
 
-  // Pre-load from cache immediately
-  const [user, setUser] = useState<GoogleUser | null>(() => {
-    if (typeof window === "undefined") return null
-    try { return JSON.parse(localStorage.getItem(GK.cachedUser) || "null") } catch { return null }
-  })
-  const [ytPlaylists, setYtPlaylists] = useState<YouTubePlaylist[]>(() => {
-    if (typeof window === "undefined") return []
-    try { return JSON.parse(localStorage.getItem(GK.cachedYTPlaylists) || "[]") } catch { return [] }
-  })
+  const [user, setUser] = useState<GoogleUser | null>(null)
   
+  // Provider-specific data
+  const [ytPlaylists, setYtPlaylists] = useState<YouTubePlaylist[]>([])
   const [ytPlaylistsLoading, setYtPlaylistsLoading] = useState(false)
+  
   const fetchedRef = useRef(false) // prevent double-fetch on StrictMode
 
-  // ─── Initialise session ───────────────────────────────────────────────────
+  // --- Low-level: Retrieve Active Token from secure backend ---
+  const getToken = useCallback(async (): Promise<string | null> => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) return null
+      
+      const res = await fetch(`/api/${provider}/token`, {
+        headers: { "Authorization": `Bearer ${session.access_token}` }
+      })
+      
+      if (!res.ok) return null
+      const data = await res.json()
+      return data.access_token || null
+    } catch {
+      return null
+    }
+  }, [provider])
+
+  // --- Low-level: Call Google API ---
+  const callGoogle = useCallback(async (endpoint: string, options: RequestInit = {}): Promise<any | null> => {
+    const token = await getToken()
+    if (!token) {
+      console.warn(`[Google ${provider}] No valid token for`, endpoint)
+      return null
+    }
+    
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      ...options.headers,
+    }
+
+    const res = await fetch(endpoint, { ...options, headers })
+    if (!res.ok) {
+      const errText = await res.text()
+      try {
+        const errObj = JSON.parse(errText)
+        if (errObj.error?.status === 'UNAUTHENTICATED' || errObj.error?.code === 401) {
+          // Token might be revoked on Google's side, force logout state
+          setIsLoggedIn(false)
+        }
+      } catch (e) {}
+      console.error(`[Google ${provider}] API error`, res.status, endpoint)
+      return null
+    }
+    
+    // Some endpoints return 204 No Content
+    if (res.status === 204) return true
+    
+    return res.json()
+  }, [getToken, provider])
+
+  // --- Initialise session ---
   useEffect(() => {
+    let active = true
+
     const init = async () => {
       setIsLoading(true)
 
-      // 1. Check for OAuth callback tokens in URL (highest priority)
-      // We use g_ prefix to avoid collision with Spotify's identical param names
+      // 1. Check if we just returned from OAuth callback
       const params = new URLSearchParams(window.location.search)
-      const atParam = params.get("g_access_token")
-      const rtParam = params.get("g_refresh_token")
-      const exParam = params.get("g_expires_in")
-      const gAuth = params.get("g_auth")
+      const connectedProvider = params.get("connected")
+      const errParam = params.get("error")
 
-      if (gAuth && atParam && exParam) {
-        const expiresAt = Date.now() + (Number(exParam) - 60) * 1000
-        localStorage.setItem(GK.accessToken, atParam)
-        localStorage.setItem(GK.expiresAt, String(expiresAt))
-        // Refresh token might only be sent on first login
-        if (rtParam) {
-          localStorage.setItem(GK.refreshToken, rtParam)
-        }
-        
-        // Clean URL properly without breaking navigation state
+      if (connectedProvider === `google_${provider}`) {
+        // Clean URL
         const url = new URL(window.location.href)
-        url.searchParams.delete("g_access_token")
-        url.searchParams.delete("g_refresh_token")
-        url.searchParams.delete("g_expires_in")
-        url.searchParams.delete("g_auth")
+        url.searchParams.delete("connected")
         window.history.replaceState({}, "", url.toString())
-        
-        setIsLoggedIn(true)
-        setIsLoading(false)
-        return
+        if (active) setIsLoggedIn(true)
+      } else if (errParam) {
+        console.error(`[Google ${provider}] OAuth error:`, errParam)
+        const url = new URL(window.location.href)
+        url.searchParams.delete("error")
+        window.history.replaceState({}, "", url.toString())
       }
 
-      const errParam = params.get("google_error")
-      if (errParam) {
-        console.error("[Google] OAuth error:", errParam)
-        const url = new URL(window.location.href)
-        url.searchParams.delete("google_error")
-        window.history.replaceState({}, "", url.toString())
-        setIsLoading(false)
-        return
-      }
-
-      // 2. Try to restore from localStorage (existing session)
+      // 2. Poll Database for Token
       const token = await getToken()
-      if (token) {
+      if (token && active) {
         setIsLoggedIn(true)
       }
-      setIsLoading(false)
+      
+      if (active) setIsLoading(false)
     }
+    
     init()
-  }, []) // runs once on mount
+    
+    return () => { active = false }
+  }, [provider, getToken])
 
-  // ─── Fetch user + initial data once logged in ─────────────────────────────
+  // --- Fetch Initial Data after Login ---
   useEffect(() => {
     if (!isLoggedIn) return
     if (fetchedRef.current) return
     fetchedRef.current = true
 
-    // Fetch user profile (Google UserInfo endpoint)
-    if (!user) {
-      callGoogle("https://www.googleapis.com/oauth2/v3/userinfo").then((data) => {
-        if (data) {
-          const u: GoogleUser = {
-            id: data.sub,
-            name: data.name,
-            email: data.email,
-            picture: data.picture,
-          }
-          setUser(u)
-          localStorage.setItem(GK.cachedUser, JSON.stringify(u))
+    // Only YouTube usually requires full profile logic right away on FlowLock, but we can do it for both if wanted
+    if (provider === 'youtube') {
+      const loadYt = async () => {
+        setYtPlaylistsLoading(true)
+        const data = await callGoogle("https://youtube.googleapis.com/youtube/v3/playlists?part=snippet&mine=true&maxResults=50")
+        if (data?.items) {
+          setYtPlaylists(data.items)
+        } else {
+          setYtPlaylists([])
         }
+        setYtPlaylistsLoading(false)
+      }
+      loadYt()
+    }
+  }, [isLoggedIn, provider, callGoogle])
+
+  // --- Login / Flow Generation ---
+  const login = useCallback(async () => {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) {
+      alert("You must be logged into FlowLock to connect Google.")
+      return
+    }
+    window.location.href = `/api/${provider}/auth?user_id=${session.user.id}`
+  }, [provider])
+
+  // --- Disconnect Backend ---
+  const logout = useCallback(async () => {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session) {
+      await fetch(`/api/${provider}/disconnect`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${session.access_token}` }
       })
     }
-
-    // Fetch YouTube playlists — show spinner only if no cache
-    const hasCachedYt = ytPlaylists.length > 0
-    if (!hasCachedYt) setYtPlaylistsLoading(true)
-
-    callGoogle("https://youtube.googleapis.com/youtube/v3/playlists?part=snippet&mine=true&maxResults=50").then((data) => {
-      if (data?.items) {
-        setYtPlaylists(data.items)
-        localStorage.setItem(GK.cachedYTPlaylists, JSON.stringify(data.items))
-      } else {
-        // Token invalid, scopes revoked, or YouTube API not enabled
-        console.warn("[Google] Failed to fetch YT playlists, ignoring instead of clearing session.")
-        setYtPlaylists([])
-      }
-      setYtPlaylistsLoading(false)
-    })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoggedIn])
-
-  // ─── Clear all Google data ───────────────────────────────────────────────
-  const clearAll = useCallback(() => {
-    Object.values(GK).forEach((k) => localStorage.removeItem(k))
     setIsLoggedIn(false)
     setUser(null)
     setYtPlaylists([])
     fetchedRef.current = false
-  }, [])
+  }, [provider])
 
-  // ─── Login ────────────────────────────────────────────────────────────────
-  const login = useCallback(async () => {
-    let host = window.location.host
-    if (host.includes("localhost")) {
-      host = host.replace("localhost", "127.0.0.1")
-    }
-    const redirectUri = `${window.location.protocol}//${host}/api/google/callback`
-    
-    // Pass current page path as 'state' so callback redirects us back here
-    const originPage = window.location.pathname
-    
-    // We MUST include access_type=offline and prompt=consent to get a refresh_token
-    const params = new URLSearchParams({
-      client_id: CLIENT_ID,
-      response_type: "code",
-      redirect_uri: redirectUri,
-      scope: SCOPES,
-      access_type: "offline",
-      prompt: "consent",
-      state: originPage,
-    })
-    window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`
-  }, [])
-
-  const logout = useCallback(() => clearAll(), [clearAll])
-
-  // ─── YouTube Methods ────────────────────────────────────────────────────
+  // --- YouTube Methods ---
   const fetchYtPlaylists = useCallback(async (): Promise<YouTubePlaylist[]> => {
     setYtPlaylistsLoading(true)
     const data = await callGoogle("https://youtube.googleapis.com/youtube/v3/playlists?part=snippet&mine=true&maxResults=50")
     const items: YouTubePlaylist[] = data?.items ?? []
     if (items.length > 0) {
       setYtPlaylists(items)
-      localStorage.setItem(GK.cachedYTPlaylists, JSON.stringify(items))
     }
     setYtPlaylistsLoading(false)
     return items
-  }, [])
+  }, [callGoogle])
   
   const getYtPlaylistItems = useCallback(async (playlistId: string): Promise<YouTubeTrack[]> => {
     const data = await callGoogle(`https://youtube.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId=${playlistId}`)
     return data?.items ?? []
-  }, [])
+  }, [callGoogle])
 
   const searchYouTube = useCallback(async (query: string): Promise<YouTubeTrack[]> => {
     if (!query.trim()) return []
-    // Search for video type only
     const data = await callGoogle(`https://youtube.googleapis.com/youtube/v3/search?part=snippet&maxResults=15&q=${encodeURIComponent(query)}&type=video`)
     return data?.items ?? []
-  }, [])
+  }, [callGoogle])
   
-  // ─── Calendar Methods ───────────────────────────────────────────────────
+  // --- Calendar Methods ---
   const fetchCalendarEvents = useCallback(async (timeMin: Date = new Date(), maxResults: number = 20): Promise<CalendarEvent[]> => {
-    // timeMin must be RFC3339 timestamp with mandatory time zone offset
     const timeStr = timeMin.toISOString()
     const data = await callGoogle(`https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${encodeURIComponent(timeStr)}&maxResults=${maxResults}&orderBy=startTime&singleEvents=true`)
     return data?.items ?? []
-  }, [])
+  }, [callGoogle])
   
   const createCalendarEvent = useCallback(async (summary: string, description: string, startTime: Date, endTime: Date): Promise<CalendarEvent | null> => {
     const event = {
@@ -305,7 +231,7 @@ export function useGoogle() {
       method: "POST",
       body: JSON.stringify(event)
     })
-  }, [])
+  }, [callGoogle])
 
   return {
     isLoggedIn,

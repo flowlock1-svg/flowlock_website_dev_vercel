@@ -162,7 +162,7 @@ function YTTrackRow({ track, onPlay, isActive }: { track: YouTubeTrack; onPlay: 
 // ─── Main component ────────────────────────────────────────────────────────────
 export default function SonarPlaylist() {
   const spotify = useSpotify()
-  const google = useGoogle()
+  const google = useGoogle('youtube')
   const {
     sonarDuration: customDuration,
     setSonarDuration: setCustomDuration,
