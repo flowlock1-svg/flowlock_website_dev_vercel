@@ -7,6 +7,7 @@ import { HeroSection } from "@/components/landing/hero-section"
 import { FeaturesSection } from "@/components/landing/features-section"
 import { HowItWorksSection } from "@/components/landing/how-it-works-section"
 import { CtaFooter } from "@/components/landing/cta-footer"
+import { Navbar } from "@/components/landing/navbar"
 
 export default function LandingPage() {
   const { isAuthenticated } = useAuth()
@@ -24,6 +25,7 @@ export default function LandingPage() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
+      <Navbar />
       <HeroSection />
       <FeaturesSection />
       <HowItWorksSection />
