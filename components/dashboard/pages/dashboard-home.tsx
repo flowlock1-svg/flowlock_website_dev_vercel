@@ -91,6 +91,7 @@ export default function DashboardHome() {
   const [streakDays, setStreakDays] = useState(0)
   const [insightMessage, setInsightMessage] = useState("Keep building your focus habits! 🚀")
   const [bestFocusTimeWindow, setBestFocusTimeWindow] = useState("Not enough data")
+  const [peakZoneDisplay, setPeakZoneDisplay] = useState("—")
   const [longestStreak, setLongestStreak] = useState(0)
   const [streakDots, setStreakDots] = useState<boolean[]>([])
   const [recentSessionDurations, setRecentSessionDurations] = useState<number[]>([])
@@ -173,64 +174,50 @@ export default function DashboardHome() {
           return
         }
 
-        let totalMs = 0
-        let totalSes = allSessions.length
-        let totalScore = 0
-        let totalDist = 0
-        let totalFoc = 0
-        let totalDistTime = 0
+        const todayStr = new Date().toDateString()
+        const todaySessions = allSessions.filter((s: any) => {
+           if (!s.started_at) return false
+           return new Date(s.started_at).toDateString() === todayStr
+        })
 
-        const nowMs = now.getTime()
-        const sevenDaysAgoMs = nowMs - 7 * 24 * 60 * 60 * 1000
-        const fourteenDaysAgoMs = nowMs - 14 * 24 * 60 * 60 * 1000
-
-        let thisWeekMs = 0
-        let lastWeekMs = 0
-
-        for (const s of allSessions) {
-          if (!s.started_at) continue
-          const dMs = (typeof s.duration_ms === 'number' ? s.duration_ms : 0)
-          totalMs += dMs
-          totalScore += (s.focus_score || 0)
-          totalDist += (s.drowsy_count || 0) + (s.head_turned_count || 0) + (s.face_missing_count || 0) + (s.unauthorized_count || 0) + (s.high_noise_count || 0)
-          totalFoc += (s.focused_time_ms || 0)
-          
-          const dt = (s.drowsy_time_ms || 0) + (s.head_turned_time_ms || 0) + (s.face_missing_time_ms || 0) + (s.unauthorized_time_ms || 0)
-          totalDistTime += dt
-
-          const sessionDateObj = new Date(s.started_at)
-          const sessionMs = sessionDateObj.getTime()
-
-          if (sessionMs >= sevenDaysAgoMs) {
-            thisWeekMs += dMs
-            const sessionDateStr = sessionDateObj.toDateString()
-            const dayEntry = days.find(d => d.date === sessionDateStr)
-            if (dayEntry) {
-              dayEntry.focusMin += Math.round(dMs / 60000)
-              dayEntry.sessions += 1
-              dayEntry.totalScore += (s.focus_score || 0)
-            }
-          } else if (sessionMs >= fourteenDaysAgoMs) {
-            lastWeekMs += dMs
-          }
+        // ====== BLOCK 1 & 3: Total Focused Time Today & Avg Session Today ======
+        let totalFocToday = 0
+        let totalDurToday = 0
+        for (const s of todaySessions) {
+          totalFocToday += (typeof s.focused_time_ms === 'number' ? s.focused_time_ms : 0)
+          totalDurToday += (typeof s.duration_ms === 'number' ? s.duration_ms : 0)
         }
+        
+        let insightMsg = "Keep building your focus habits! 🚀"
+        if (todaySessions.length >= 10) insightMsg = "You're a focus machine! 🏆"
+        else if (todaySessions.length >= 5) insightMsg = "You're building momentum! ⚡"
+        else if (todaySessions.length >= 1) insightMsg = "Great start — keep it up! 🔥"
 
-        for (const d of days) {
-          if (d.sessions > 0) d.avgScore = Math.round(d.totalScore / d.sessions)
+        setTotalStudyMs(totalFocToday) // Using focused time today for the display
+        setTotalSessions(todaySessions.length)
+        setInsightMessage(insightMsg)
+        
+        setAvgSessionMs(todaySessions.length > 0 ? Math.round(totalDurToday / todaySessions.length) : 0)
+
+        // ====== BLOCK 2: Average Focus Today ======
+        let todayScoreSum = 0
+        let todayMaxScore = 0
+        for (const s of todaySessions) {
+          const score = typeof s.focus_score === 'number' ? s.focus_score : 0
+          todayScoreSum += score
+          if (score > todayMaxScore) todayMaxScore = score
         }
+        setAvgFocusScore(todaySessions.length > 0 ? Math.round(todayScoreSum / todaySessions.length) : 0)
+        setBestFocusTimeWindow(todaySessions.length > 0 ? `${todayMaxScore}pts` : "Not enough data")
 
-        const bestDay = days.reduce((prev, current) => (prev.focusMin > current.focusMin) ? prev : current, days[0])
+        // ====== BLOCK 4: Distractions Today ======
+        let distToday = 0
+        for (const s of todaySessions) {
+          distToday += (s.drowsy_count || 0) + (s.head_turned_count || 0) + (s.face_missing_count || 0) + (s.unauthorized_count || 0) + (s.high_noise_count || 0)
+        }
+        setTotalDistractions(distToday)
 
-        setTotalStudyMs(totalMs)
-        setTotalSessions(totalSes)
-        setAvgFocusScore(Math.round(totalScore / totalSes))
-        setAvgSessionMs(Math.round(totalMs / totalSes))
-        setTotalDistractions(totalDist)
-        setTotalFocusedMs(totalFoc)
-        setTotalDistractedMs(totalDistTime)
-        setDailyData(days)
-
-        // Maps date to boolean
+        // ====== BLOCK 5: Current Streak (using allSessions) ======
         const dailySessionsObj: Record<string, boolean> = {}
         for (const s of allSessions) {
            if (s.started_at) {
@@ -239,123 +226,121 @@ export default function DashboardHome() {
              dailySessionsObj[dStr] = true
            }
         }
-
-        // Current Streak calculation (endless)
         let streak = 0
-        const today = new Date()
-        const checkDate = new Date(today.getFullYear(), today.getMonth(), today.getDate())
-        let dStr = checkDate.getFullYear() + "-" + (checkDate.getMonth()+1) + "-" + checkDate.getDate()
-        
-        if (dailySessionsObj[dStr]) {
-            streak = 1
-            checkDate.setDate(checkDate.getDate() - 1)
-        } else {
-            checkDate.setDate(checkDate.getDate() - 1)
-            let yStr = checkDate.getFullYear() + "-" + (checkDate.getMonth()+1) + "-" + checkDate.getDate()
-            if (dailySessionsObj[yStr]) {
-                streak = 1
+        const checkDate = new Date()
+        while (true) {
+          const dStr = checkDate.getFullYear() + "-" + (checkDate.getMonth()+1) + "-" + checkDate.getDate()
+          if (dailySessionsObj[dStr]) {
+             streak++
+             checkDate.setDate(checkDate.getDate() - 1)
+          } else {
+             if (streak === 0) { 
                 checkDate.setDate(checkDate.getDate() - 1)
-            }
-        }
-        
-        if (streak > 0) {
-            while (true) {
-               let currStr = checkDate.getFullYear() + "-" + (checkDate.getMonth()+1) + "-" + checkDate.getDate()
-               if (dailySessionsObj[currStr]) {
-                   streak++
+                const yStr = checkDate.getFullYear() + "-" + (checkDate.getMonth()+1) + "-" + checkDate.getDate()
+                if (dailySessionsObj[yStr]) {
+                   streak = 1
                    checkDate.setDate(checkDate.getDate() - 1)
-               } else {
-                   break
-               }
-            }
+                   continue
+                }
+             }
+             break
+          }
         }
-        
         setStreakDays(streak)
-        setStreakDots(days.map((d: any) => d.sessions > 0))
+        const recentDots = Array.from({length: 7}, (_, i) => i < Math.min(streak, 7))
+        setStreakDots(recentDots.reverse()) 
+        setLongestStreak(streak)
 
-        // Longest streak
-        const activeDates = Object.keys(dailySessionsObj).map(str => new Date(str).getTime()).sort((a,b) => a - b)
-        let longest = 0
-        let currentLoopStreak = 0
-        let lastDateMs = 0
-        for (let ms of activeDates) {
-            if (lastDateMs === 0) {
-               currentLoopStreak = 1
-            } else {
-               const diffDays = Math.round((ms - lastDateMs) / (1000 * 60 * 60 * 24))
-               if (diffDays === 1) {
-                  currentLoopStreak++
-               } else if (diffDays > 1) {
-                  currentLoopStreak = 1
-               }
-            }
-            if (currentLoopStreak > longest) longest = currentLoopStreak
-            lastDateMs = ms
-        }
-        setLongestStreak(longest)
-
-        // Peak Zone (Best focus time)
-        const hourScores: Record<number, {total: number, count: number}> = {}
+        // ====== BLOCK 6: Peak Zone ======
+        const hourBuckets: Record<number, {total: number, count: number}> = {}
         for (const s of allSessions) {
           if (!s.started_at || typeof s.focus_score !== 'number') continue
           const h = new Date(s.started_at).getHours()
-          if (!hourScores[h]) hourScores[h] = {total: 0, count: 0}
-          hourScores[h].total += s.focus_score
-          hourScores[h].count++
+          const bucket = Math.floor(h / 2) * 2 // 0, 2, ...
+          if (!hourBuckets[bucket]) hourBuckets[bucket] = {total: 0, count: 0}
+          hourBuckets[bucket].total += s.focus_score
+          hourBuckets[bucket].count++
         }
-        let bestHour = -1
-        let bestAverage = -1
-        for (const hStr in hourScores) {
-           const h = parseInt(hStr)
-           const avg = hourScores[h].total / hourScores[h].count
-           if (avg > bestAverage && hourScores[h].count > 0) {
-             bestAverage = avg
-             bestHour = h
+        let bestBucket = -1
+        let bestBucketAvg = -1
+        for (const bStr in hourBuckets) {
+           const b = parseInt(bStr)
+           const avg = hourBuckets[b].total / hourBuckets[b].count
+           if (avg > bestBucketAvg && hourBuckets[b].count > 0) {
+             bestBucketAvg = avg
+             bestBucket = b
            }
         }
-        if (bestHour !== -1) {
+        if (allSessions.length >= 3 && bestBucket !== -1) {
            const formatHour = (hour: number) => {
-               const ampm = hour >= 12 ? 'am' : 'pm'
+               const ampm = hour >= 12 ? 'pm' : 'am'
                const h12 = hour % 12 || 12
                return `${h12}${ampm}`
            }
-           setBestFocusTimeWindow(`${formatHour(bestHour)}–${formatHour((bestHour + 1) % 24)}`)
+           setPeakZoneDisplay(`${formatHour(bestBucket)}–${formatHour((bestBucket + 2) % 24)}`)
         } else {
-           setBestFocusTimeWindow("Not enough data")
+           setPeakZoneDisplay("—")
         }
 
-        // Sparkline & trend calculation
-        const last7Sessions = allSessions.slice(-7)
-        const durations = last7Sessions.map((s: any) => typeof s.duration_ms === 'number' ? Math.round(s.duration_ms / 60000) : 0)
+        // Keep dailyData populated for the chart
+        for (const s of allSessions) {
+           if (!s.started_at) continue
+           const sessionDateStr = new Date(s.started_at).toDateString()
+           const dayEntry = days.find(d => d.date === sessionDateStr)
+           if (dayEntry) {
+              const dMs = typeof s.duration_ms === 'number' ? s.duration_ms : 0
+              dayEntry.focusMin += Math.round(dMs / 60000)
+              dayEntry.sessions += 1
+              dayEntry.totalScore += (s.focus_score || 0)
+           }
+        }
+        for (const d of days) {
+           if (d.sessions > 0) d.avgScore = Math.round(d.totalScore / d.sessions)
+        }
+        setDailyData(days)
+
+        // Required to not break productivity charts logic
+        let prodMs = 0
+        let distMs = 0
+        let totDurationMs = 0
+        const sessionDurations = []
+        for (const s of allSessions) {
+           prodMs += (s.focused_time_ms || 0)
+           distMs += ((s.drowsy_time_ms || 0) + (s.head_turned_time_ms || 0) + (s.face_missing_time_ms || 0) + (s.unauthorized_time_ms || 0))
+           totDurationMs += (s.duration_ms || 0)
+           sessionDurations.push(typeof s.duration_ms === 'number' ? Math.round(s.duration_ms / 60000) : 0)
+        }
+        setTotalFocusedMs(prodMs)
+        setTotalDistractedMs(distMs)
         
         let trendUp = false
-        if (durations.length >= 2) {
-            const firstHalf = durations.slice(0, Math.max(1, Math.floor(durations.length / 2)))
-            const secondHalf = durations.slice(Math.max(1, Math.floor(durations.length / 2)))
+        if (sessionDurations.length >= 2) {
+            const firstHalf = sessionDurations.slice(0, Math.max(1, Math.floor(sessionDurations.length / 2)))
+            const secondHalf = sessionDurations.slice(Math.max(1, Math.floor(sessionDurations.length / 2)))
             const firstAvg = firstHalf.reduce((a: number, b: number) => a + b, 0) / (firstHalf.length || 1)
             const secondAvg = secondHalf.reduce((a: number, b: number) => a + b, 0) / (secondHalf.length || 1)
             trendUp = secondAvg >= firstAvg && secondAvg > 0
         }
-        
-        setRecentSessionDurations(durations)
+        setRecentSessionDurations(sessionDurations.slice(-7))
         setIsSessionTrendUp(trendUp)
 
-        // Distractions by hour calculation
+        // Distractions chart data
         const hourDistractions = Array(24).fill(0)
-        for (const s of allSessions) {
-          if (!s.started_at) continue
-          const distAmount = (s.drowsy_count || 0) + (s.head_turned_count || 0) + (s.face_missing_count || 0)
-          if (distAmount > 0) {
-             const h = new Date(s.started_at).getHours()
-             hourDistractions[h] += distAmount
-          }
-        }
         let maxDist = 0
         let worstH = -1
-        for (let i = 0; i < 24; i++) {
-           if (hourDistractions[i] > maxDist) {
-             maxDist = hourDistractions[i]
-             worstH = i
+        if (todaySessions.length > 0) {
+           for (const s of todaySessions) {
+             const distAmount = (s.drowsy_count || 0) + (s.head_turned_count || 0) + (s.face_missing_count || 0)
+             if (distAmount > 0 && s.started_at) {
+                const h = new Date(s.started_at).getHours()
+                hourDistractions[h] += distAmount
+             }
+           }
+           for (let i = 0; i < 24; i++) {
+              if (hourDistractions[i] > maxDist) {
+                maxDist = hourDistractions[i]
+                worstH = i
+              }
            }
         }
         let worstLabel = null
@@ -369,15 +354,6 @@ export default function DashboardHome() {
         }
         setDistractionHourData(hourDistractions.map((val, idx) => ({ name: idx.toString(), value: val })))
         setWorstDistractionHour(worstLabel)
-
-        if (thisWeekMs > lastWeekMs && lastWeekMs > 0) {
-          const pct = Math.round(((thisWeekMs - lastWeekMs) / lastWeekMs) * 100)
-          setInsightMessage(`You've studied ${pct}% more than last week 🔥`)
-        } else if (bestDay && bestDay.focusMin > 0) {
-          setInsightMessage(`Your best day this week was ${bestDay.day} with ${bestDay.focusMin}m focused 🎯`)
-        } else {
-          setInsightMessage("Keep building your focus habits! 🚀")
-        }
 
       } catch (e) {
         console.error("Failed to fetch dashboard data:", e)
@@ -556,9 +532,9 @@ export default function DashboardHome() {
                 {totalStudyMs > 0
                   ? (() => {
                       const totalMin = Math.round(totalStudyMs / 60000)
-                      return totalMin >= 60 ? `${Math.floor(totalMin / 60)}h ${totalMin % 60}m` : `${totalMin}m`
+                      return `${Math.floor(totalMin / 60)}h ${totalMin % 60}m`
                     })()
-                  : "0m"}
+                  : "0h 0m"}
               </p>
               <p className="text-sm font-medium text-emerald-500/60">
                 total across {totalSessions} session{totalSessions !== 1 ? "s" : ""}
@@ -661,39 +637,26 @@ export default function DashboardHome() {
               </div>
               
               <div className="flex flex-wrap items-baseline gap-2">
-                <p className="text-3xl font-bold tracking-tight text-foreground">
-                  {lastFocusSession
-                    ? lastFocusSession.drowsyCount + lastFocusSession.headTurnedCount + lastFocusSession.faceMissingCount
-                    : totalDistractions > 0 ? totalDistractions : "—"}
-                </p>
-                {worstDistractionHour && !lastFocusSession && (
-                  <span className="text-[10px] font-bold text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded truncate">
-                    Most at {worstDistractionHour}
-                  </span>
+                {totalDistractions === 0 ? (
+                  <p className="text-sm font-medium text-emerald-500 mt-2">
+                    No distractions logged yet — great focus!
+                  </p>
+                ) : (
+                  <>
+                    <p className="text-3xl font-bold tracking-tight text-white">{totalDistractions}</p>
+                    <span className="text-xs text-muted-foreground">total distractions</span>
+                  </>
                 )}
               </div>
             </div>
 
             <div className="h-12 mt-auto w-full -ml-1">
-              {!lastFocusSession && totalDistractions > 0 ? (
+              {totalDistractions > 0 && (
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={distractionHourData}>
                     <Bar dataKey="value" fill="#f59e0b" radius={[2, 2, 0, 0]} isAnimationActive={false} />
                   </BarChart>
                 </ResponsiveContainer>
-              ) : lastFocusSession ? (
-                <div className="h-full flex items-end">
-                  <p className="text-xs font-medium text-muted-foreground">
-                    {[lastFocusSession.drowsyCount > 0 ? `${lastFocusSession.drowsyCount} drowsy` : null,
-                      lastFocusSession.headTurnedCount > 0 ? `${lastFocusSession.headTurnedCount} head-turn` : null,
-                      lastFocusSession.faceMissingCount > 0 ? `${lastFocusSession.faceMissingCount} face-miss` : null,
-                    ].filter(Boolean).join(' · ') || "No distractions logged yet — great focus!"}
-                  </p>
-                </div>
-              ) : (
-                <div className="h-full flex items-end">
-                  <p className="text-xs font-medium text-emerald-500">No distractions logged yet — great focus!</p>
-                </div>
               )}
             </div>
           </CardContent>
@@ -708,8 +671,13 @@ export default function DashboardHome() {
               </div>
               <div className="flex items-baseline gap-2">
                 <p className="text-3xl font-bold tracking-tight text-foreground">
-                  {streakDays > 0 ? `${streakDays} day${streakDays !== 1 ? "s" : ""}` : "—"}
+                  {streakDays > 0 ? `${streakDays} day streak` : "—"}
                 </p>
+                {streakDays >= 7 && (
+                  <span className="text-[10px] font-bold text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded flex items-center gap-0.5 uppercase tracking-wider">
+                    🔥 Week streak!
+                  </span>
+                )}
               </div>
             </div>
 
@@ -755,9 +723,7 @@ export default function DashboardHome() {
               </div>
               <div className="flex items-center gap-2">
                 <p className="text-[1.35rem] font-bold tracking-tight text-foreground leading-none">
-                  {totalSessions >= 3 && bestFocusTimeWindow && bestFocusTimeWindow !== "Not enough data" 
-                    ? bestFocusTimeWindow
-                    : "—"}
+                  {peakZoneDisplay}
                 </p>
               </div>
             </div>
