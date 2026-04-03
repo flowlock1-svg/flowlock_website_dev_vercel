@@ -14,7 +14,6 @@ import { usePomodoro } from "@/components/providers/pomodoro-provider"
 import { supabase } from "@/utils/supabase/client"
 import { toast } from "sonner"
 import { useFaceAuth } from "@/hooks/use-face-auth"
-import { useSessions } from "@/components/providers/session-provider"
 
 // Session result data passed to parent
 export interface FocusSessionResult {
@@ -70,7 +69,6 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
     const { user } = useAuth()
     const { startFocusSession, isFocusActive, focusElapsed, targetDuration, setFocusElapsed, stopFocusSession, setLastFocusSession } = useFocus()
     const { updateBreakState, completeSession } = usePomodoro()
-    const { fetchSessionStats, sessions } = useSessions()
     const router = useRouter()
     const {
         loadModels,
@@ -678,12 +676,10 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
                     })
                     if (error) throw error
                     
-                    // Fetch directly from the root layout context to update dashboard stats
-                    console.log('[SYNC] Insert success, sessions in context before refetch:', sessions?.length)
-                    await fetchSessionStats()
-                    console.log('[SYNC] fetchSessionStats() completed, sessions in context after refetch:', sessions?.length)
+                    console.log('[SAVE] Session inserted — Realtime will sync dashboard')
                 } catch (err) {
-                    console.error('Session save failed silently:', err)
+                    console.error('[SAVE] Insert failed:', err)
+                    // show toast only, never affect UI phase
                     toast.error("Sync failed — data saved locally", { duration: 3000 })
                 }
             }
@@ -697,7 +693,7 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
                       : "Tough session? Rest up and keep going!"
             toast.success(msg, { duration: 4000, position: "top-center" })
         }
-    }, [onSessionComplete, stopFocusSession, completeSession, targetDuration, updateBreakState, user, setLastFocusSession, noiseState.highNoiseCount, updateStatusUI, stopNoise, fetchSessionStats])
+    }, [onSessionComplete, stopFocusSession, completeSession, targetDuration, updateBreakState, user, setLastFocusSession, noiseState.highNoiseCount, updateStatusUI, stopNoise])
 
     // STEP 5 — PDF generation moved to on-demand only
     const handleDownloadReport = async () => {

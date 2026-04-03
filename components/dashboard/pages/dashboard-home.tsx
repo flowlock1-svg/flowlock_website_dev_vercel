@@ -65,7 +65,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 
 import { useAuth } from "@/components/providers/auth-provider"
 import { useFocus } from "@/components/providers/focus-provider"
-import { useSessions } from "@/components/providers/session-provider"
+import { useStudySessions } from "@/hooks/use-study-sessions"
 
 // Helper: ms to hours
 function msToHours(ms: number) {
@@ -80,40 +80,13 @@ function msToMinutes(ms: number) {
 export default function DashboardHome() {
   const { user } = useAuth()
   const { lastFocusSession } = useFocus()
-  const { sessions, loading: sessionsLoading } = useSessions()
+  const { sessions, loading: isLoading } = useStudySessions()
 
-  const [isLoading, setIsLoading] = useState(true)
-  const [dailyData, setDailyData] = useState<any[]>([])
-  const [totalStudyMs, setTotalStudyMs] = useState(0)
-  const [avgFocusScore, setAvgFocusScore] = useState(0)
-  const [totalSessions, setTotalSessions] = useState(0)
-  const [avgSessionMs, setAvgSessionMs] = useState(0)
-  const [totalDistractions, setTotalDistractions] = useState(0)
-  const [totalFocusedMs, setTotalFocusedMs] = useState(0)
-  const [totalDistractedMs, setTotalDistractedMs] = useState(0)
-  const [streakDays, setStreakDays] = useState(0)
-  const [insightMessage, setInsightMessage] = useState("Keep building your focus habits! 🚀")
-  const [bestFocusTimeWindow, setBestFocusTimeWindow] = useState("Not enough data")
-  const [peakZoneDisplay, setPeakZoneDisplay] = useState("—")
-  const [longestStreak, setLongestStreak] = useState(0)
-  const [streakDots, setStreakDots] = useState<boolean[]>([])
-  const [recentSessionDurations, setRecentSessionDurations] = useState<number[]>([])
-  const [isSessionTrendUp, setIsSessionTrendUp] = useState(false)
-  const [distractionHourData, setDistractionHourData] = useState<{name: string, value: number}[]>([])
-  const [worstDistractionHour, setWorstDistractionHour] = useState<string | null>(null)
   const [motivationalQuote, setMotivationalQuote] = useState<{ text: string; author: string } | null>(null)
   const [aiQuickTip, setAiQuickTip] = useState<string | null>(null)
   const [aiTipLoading, setAiTipLoading] = useState(false)
   const [todayInsight, setTodayInsight] = useState<string | null>(null)
   const [todayInsightLoading, setTodayInsightLoading] = useState(false)
-
-  console.log('[DASHBOARD] Rendering, sessions count:', sessions?.length, 'stats:', { totalSessions, avgFocusScore })
-
-  useEffect(() => {
-    if (user === null && typeof localStorage !== 'undefined') {
-      localStorage.removeItem('flowlock_stats_cache')
-    }
-  }, [user])
 
   // Pick a daily-rotating quote if the pref is enabled
   useEffect(() => {
@@ -122,8 +95,6 @@ export default function DashboardHome() {
       setMotivationalQuote(MOTIVATIONAL_QUOTES[dayIndex % MOTIVATIONAL_QUOTES.length])
     }
   }, [])
-
-  if (!user) return null
 
   // Fetch AI quick tip when a focus session just ended
   useEffect(() => {
@@ -145,219 +116,193 @@ export default function DashboardHome() {
       .finally(() => setAiTipLoading(false))
   }, [lastFocusSession, user])
 
-  useEffect(() => {
-    if (!user?.id) return;
-    if (sessionsLoading) {
-      setIsLoading(true)
-      return
+  const stats = useMemo(() => {
+    const allSessions = sessions || []
+    
+    // Base stats requested by user
+    const totalSessions = allSessions.length
+    const totalFocusedMs = allSessions.reduce((s, r) => s + (r.focused_time_ms ?? 0), 0)
+    const avgFocusScore = allSessions.length ? Math.round(allSessions.reduce((s, r) => s + r.focus_score, 0) / allSessions.length) : 0
+    const avgDurationMs = allSessions.length ? allSessions.reduce((s, r) => s + r.duration_ms, 0) / allSessions.length : 0
+    const bestFocusScore = allSessions.length ? Math.max(...allSessions.map(r => r.focus_score)) : 0
+    const totalDistractions = allSessions.reduce((s, r) =>
+      s + (r.drowsy_count ?? 0) + (r.head_turned_count ?? 0) +
+      (r.face_missing_count ?? 0) + (r.unauthorized_count ?? 0) +
+      (r.high_noise_count ?? 0), 0)
+
+    // Current Streak computation
+    let currentStreak = 0
+    const dailySessionsObj: Record<string, boolean> = {}
+    for (const s of allSessions) {
+       if (s.started_at) {
+         const dt = new Date(s.started_at)
+         const dStr = dt.getFullYear() + "-" + (dt.getMonth()+1) + "-" + dt.getDate()
+         dailySessionsObj[dStr] = true
+       }
+    }
+    const checkDate = new Date()
+    while (true) {
+      const dStr = checkDate.getFullYear() + "-" + (checkDate.getMonth()+1) + "-" + checkDate.getDate()
+      if (dailySessionsObj[dStr]) {
+         currentStreak++
+         checkDate.setDate(checkDate.getDate() - 1)
+      } else {
+         if (currentStreak === 0) { 
+            checkDate.setDate(checkDate.getDate() - 1)
+            const yStr = checkDate.getFullYear() + "-" + (checkDate.getMonth()+1) + "-" + checkDate.getDate()
+            if (dailySessionsObj[yStr]) {
+               currentStreak = 1
+               checkDate.setDate(checkDate.getDate() - 1)
+               continue
+            }
+         }
+         break
+      }
+    }
+    const streakDots = Array.from({length: 7}, (_, i) => i < Math.min(currentStreak, 7)).reverse()
+
+    // Peak Zone computation
+    let peakZone = null
+    if (allSessions.length >= 3) {
+      const hourBuckets: Record<number, {total: number, count: number}> = {}
+      for (const s of allSessions) {
+        if (!s.started_at || typeof s.focus_score !== 'number') continue
+        const h = new Date(s.started_at).getHours()
+        const bucket = Math.floor(h / 2) * 2
+        if (!hourBuckets[bucket]) hourBuckets[bucket] = {total: 0, count: 0}
+        hourBuckets[bucket].total += s.focus_score
+        hourBuckets[bucket].count++
+      }
+      let bestBucket = -1
+      let bestBucketAvg = -1
+      for (const bStr in hourBuckets) {
+         const b = parseInt(bStr)
+         const avg = hourBuckets[b].total / hourBuckets[b].count
+         if (avg > bestBucketAvg && hourBuckets[b].count > 0) {
+           bestBucketAvg = avg
+           bestBucket = b
+         }
+      }
+      if (bestBucket !== -1) {
+         const formatHour = (hour: number) => {
+             const ampm = hour >= 12 ? 'pm' : 'am'
+             const h12 = hour % 12 || 12
+             return `${h12}${ampm}`
+         }
+         peakZone = `${formatHour(bestBucket)}–${formatHour((bestBucket + 2) % 24)}`
+      }
     }
 
-    const computeAndSetStats = (allSessions: any[]) => {
-        const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
-        const now = new Date()
-        const days: any[] = []
-        for (let i = 6; i >= 0; i--) {
-          const d = new Date(now)
-          d.setDate(now.getDate() - i)
-          days.push({
-            day: DAY_LABELS[d.getDay()],
-            date: d.toDateString(),
-            focusMin: 0,
-            sessions: 0,
-            totalScore: 0,
-            avgScore: 0,
-          })
-        }
-
-        if (!allSessions || allSessions.length === 0) {
-          setDailyData(days)
-          setIsLoading(false)
-          return
-        }
-
-        const todayStr = new Date().toDateString()
-        const todaySessions = allSessions.filter((s: any) => {
-           if (!s.started_at) return false
-           return new Date(s.started_at).toDateString() === todayStr
-        })
-
-        // ====== BLOCK 1 & 3: Total Focused Time Today & Avg Session Today ======
-        let totalFocToday = 0
-        let totalDurToday = 0
-        for (const s of todaySessions) {
-          totalFocToday += (typeof s.focused_time_ms === 'number' ? s.focused_time_ms : 0)
-          totalDurToday += (typeof s.duration_ms === 'number' ? s.duration_ms : 0)
-        }
-        
-        let insightMsg = "Keep building your focus habits! 🚀"
-        if (todaySessions.length >= 10) insightMsg = "You're a focus machine! 🏆"
-        else if (todaySessions.length >= 5) insightMsg = "You're building momentum! ⚡"
-        else if (todaySessions.length >= 1) insightMsg = "Great start — keep it up! 🔥"
-
-        setTotalStudyMs(totalFocToday) // Using focused time today for the display
-        setTotalSessions(todaySessions.length)
-        setInsightMessage(insightMsg)
-        
-        setAvgSessionMs(todaySessions.length > 0 ? Math.round(totalDurToday / todaySessions.length) : 0)
-
-        // ====== BLOCK 2: Average Focus Today ======
-        let todayScoreSum = 0
-        let todayMaxScore = 0
-        for (const s of todaySessions) {
-          const score = typeof s.focus_score === 'number' ? s.focus_score : 0
-          todayScoreSum += score
-          if (score > todayMaxScore) todayMaxScore = score
-        }
-        setAvgFocusScore(todaySessions.length > 0 ? Math.round(todayScoreSum / todaySessions.length) : 0)
-        setBestFocusTimeWindow(todaySessions.length > 0 ? `${todayMaxScore}pts` : "Not enough data")
-
-        // ====== BLOCK 4: Distractions Today ======
-        let distToday = 0
-        for (const s of todaySessions) {
-          distToday += (s.drowsy_count || 0) + (s.head_turned_count || 0) + (s.face_missing_count || 0) + (s.unauthorized_count || 0) + (s.high_noise_count || 0)
-        }
-        setTotalDistractions(distToday)
-
-        // ====== BLOCK 5: Current Streak (using allSessions) ======
-        const dailySessionsObj: Record<string, boolean> = {}
-        for (const s of allSessions) {
-           if (s.started_at) {
-             const dt = new Date(s.started_at)
-             const dStr = dt.getFullYear() + "-" + (dt.getMonth()+1) + "-" + dt.getDate()
-             dailySessionsObj[dStr] = true
-           }
-        }
-        let streak = 0
-        const checkDate = new Date()
-        while (true) {
-          const dStr = checkDate.getFullYear() + "-" + (checkDate.getMonth()+1) + "-" + checkDate.getDate()
-          if (dailySessionsObj[dStr]) {
-             streak++
-             checkDate.setDate(checkDate.getDate() - 1)
-          } else {
-             if (streak === 0) { 
-                checkDate.setDate(checkDate.getDate() - 1)
-                const yStr = checkDate.getFullYear() + "-" + (checkDate.getMonth()+1) + "-" + checkDate.getDate()
-                if (dailySessionsObj[yStr]) {
-                   streak = 1
-                   checkDate.setDate(checkDate.getDate() - 1)
-                   continue
-                }
-             }
-             break
-          }
-        }
-        setStreakDays(streak)
-        const recentDots = Array.from({length: 7}, (_, i) => i < Math.min(streak, 7))
-        setStreakDots(recentDots.reverse()) 
-        setLongestStreak(streak)
-
-        // ====== BLOCK 6: Peak Zone ======
-        const hourBuckets: Record<number, {total: number, count: number}> = {}
-        for (const s of allSessions) {
-          if (!s.started_at || typeof s.focus_score !== 'number') continue
-          const h = new Date(s.started_at).getHours()
-          const bucket = Math.floor(h / 2) * 2 // 0, 2, ...
-          if (!hourBuckets[bucket]) hourBuckets[bucket] = {total: 0, count: 0}
-          hourBuckets[bucket].total += s.focus_score
-          hourBuckets[bucket].count++
-        }
-        let bestBucket = -1
-        let bestBucketAvg = -1
-        for (const bStr in hourBuckets) {
-           const b = parseInt(bStr)
-           const avg = hourBuckets[b].total / hourBuckets[b].count
-           if (avg > bestBucketAvg && hourBuckets[b].count > 0) {
-             bestBucketAvg = avg
-             bestBucket = b
-           }
-        }
-        if (allSessions.length >= 3 && bestBucket !== -1) {
-           const formatHour = (hour: number) => {
-               const ampm = hour >= 12 ? 'pm' : 'am'
-               const h12 = hour % 12 || 12
-               return `${h12}${ampm}`
-           }
-           setPeakZoneDisplay(`${formatHour(bestBucket)}–${formatHour((bestBucket + 2) % 24)}`)
-        } else {
-           setPeakZoneDisplay("—")
-        }
-
-        // Keep dailyData populated for the chart
-        for (const s of allSessions) {
-           if (!s.started_at) continue
-           const sessionDateStr = new Date(s.started_at).toDateString()
-           const dayEntry = days.find(d => d.date === sessionDateStr)
-           if (dayEntry) {
-              const dMs = typeof s.duration_ms === 'number' ? s.duration_ms : 0
-              dayEntry.focusMin += Math.round(dMs / 60000)
-              dayEntry.sessions += 1
-              dayEntry.totalScore += (s.focus_score || 0)
-           }
-        }
-        for (const d of days) {
-           if (d.sessions > 0) d.avgScore = Math.round(d.totalScore / d.sessions)
-        }
-        setDailyData(days)
-
-        // Required to not break productivity charts logic
-        let prodMs = 0
-        let distMs = 0
-        for (const s of allSessions) {
-           prodMs += (s.focused_time_ms || 0)
-           distMs += ((s.drowsy_time_ms || 0) + (s.head_turned_time_ms || 0) + (s.face_missing_time_ms || 0) + (s.unauthorized_time_ms || 0))
-        }
-        setTotalFocusedMs(prodMs)
-        setTotalDistractedMs(distMs)
-        
-        const sessionDurations = allSessions.map((s: any) => typeof s.duration_ms === 'number' ? Math.round(s.duration_ms / 60000) : 0).reverse()
-        let trendUp = false
-        if (sessionDurations.length >= 2) {
-            const firstHalf = sessionDurations.slice(0, Math.max(1, Math.floor(sessionDurations.length / 2)))
-            const secondHalf = sessionDurations.slice(Math.max(1, Math.floor(sessionDurations.length / 2)))
-            const firstAvg = firstHalf.reduce((a: number, b: number) => a + b, 0) / (firstHalf.length || 1)
-            const secondAvg = secondHalf.reduce((a: number, b: number) => a + b, 0) / (secondHalf.length || 1)
-            trendUp = secondAvg >= firstAvg && secondAvg > 0
-        }
-        setRecentSessionDurations(sessionDurations.slice(-7))
-        setIsSessionTrendUp(trendUp)
-
-        // Distractions chart data
-        const hourDistractions = Array(24).fill(0)
-        let maxDist = 0
-        let worstH = -1
-        if (todaySessions.length > 0) {
-           for (const s of todaySessions) {
-             const distAmount = (s.drowsy_count || 0) + (s.head_turned_count || 0) + (s.face_missing_count || 0)
-             if (distAmount > 0 && s.started_at) {
-                const h = new Date(s.started_at).getHours()
-                hourDistractions[h] += distAmount
-             }
-           }
-           for (let i = 0; i < 24; i++) {
-              if (hourDistractions[i] > maxDist) {
-                maxDist = hourDistractions[i]
-                worstH = i
-              }
-           }
-        }
-        let worstLabel = null
-        if (worstH !== -1) {
-            const formatHour = (hour: number) => {
-               const ampm = hour >= 12 ? 'PM' : 'AM'
-               const h12 = hour % 12 || 12
-               return `${h12} ${ampm}`
-           }
-           worstLabel = `${formatHour(worstH)} – ${formatHour((worstH + 1) % 24)}`
-        }
-        setDistractionHourData(hourDistractions.map((val, idx) => ({ name: idx.toString(), value: val })))
-        setWorstDistractionHour(worstLabel)
-        
-        setIsLoading(false)
+    // Chart Data computations (Retrofitting old UI state into useMemo)
+    const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+    const now = new Date()
+    const days: any[] = []
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now)
+      d.setDate(now.getDate() - i)
+      days.push({
+        day: DAY_LABELS[d.getDay()],
+        date: d.toDateString(),
+        focusMin: 0,
+        sessions: 0,
+        totalScore: 0,
+        avgScore: 0,
+      })
+    }
+    for (const s of allSessions) {
+       if (!s.started_at) continue
+       const sessionDateStr = new Date(s.started_at).toDateString()
+       const dayEntry = days.find(d => d.date === sessionDateStr)
+       if (dayEntry) {
+          const dMs = typeof s.duration_ms === 'number' ? s.duration_ms : 0
+          dayEntry.focusMin += Math.round(dMs / 60000)
+          dayEntry.sessions += 1
+          dayEntry.totalScore += (s.focus_score || 0)
+       }
+    }
+    for (const d of days) {
+       if (d.sessions > 0) d.avgScore = Math.round(d.totalScore / d.sessions)
     }
 
-    computeAndSetStats(sessions || [])
-  }, [user?.id, sessions, sessionsLoading])
+    const todayStr = new Date().toDateString()
+    const todaySessions = allSessions.filter((s: any) => s.started_at && new Date(s.started_at).toDateString() === todayStr)
+    let todayFocusMs = 0
+    let todayDurMs = 0
+    let todayScoreSum = 0
+    for (const s of todaySessions) {
+      todayFocusMs += (s.focused_time_ms || 0)
+      todayDurMs += (s.duration_ms || 0)
+      todayScoreSum += (s.focus_score || 0)
+    }
+
+    let insightMsg = "Keep building your focus habits! 🚀"
+    if (todaySessions.length >= 10) insightMsg = "You're a focus machine! 🏆"
+    else if (todaySessions.length >= 5) insightMsg = "You're building momentum! ⚡"
+    else if (todaySessions.length >= 1) insightMsg = "Great start — keep it up! 🔥"
+
+    let distMs = 0
+    for (const s of allSessions) {
+       distMs += ((s.drowsy_time_ms || 0) + (s.head_turned_time_ms || 0) + (s.face_missing_time_ms || 0) + (s.unauthorized_time_ms || 0))
+    }
+
+    const sessionDurations = allSessions.map((s: any) => typeof s.duration_ms === 'number' ? Math.round(s.duration_ms / 60000) : 0).reverse()
+    let trendUp = false
+    if (sessionDurations.length >= 2) {
+        const fh = sessionDurations.slice(0, Math.max(1, Math.floor(sessionDurations.length / 2)))
+        const sh = sessionDurations.slice(Math.max(1, Math.floor(sessionDurations.length / 2)))
+        const fAvg = fh.reduce((a: number, b: number) => a + b, 0) / fh.length
+        const sAvg = sh.reduce((a: number, b: number) => a + b, 0) / sh.length
+        trendUp = sAvg >= fAvg && sAvg > 0
+    }
+
+    const hourDistractions = Array(24).fill(0)
+    for (const s of todaySessions) {
+      const distAmount = (s.drowsy_count || 0) + (s.head_turned_count || 0) + (s.face_missing_count || 0)
+      if (distAmount > 0 && s.started_at) {
+         hourDistractions[new Date(s.started_at).getHours()] += distAmount
+      }
+    }
+
+    return {
+      totalStudyMs: todayFocusMs,
+      totalSessions: todaySessions.length,
+      insightMessage: insightMsg,
+      avgSessionMs: todaySessions.length > 0 ? Math.round(todayDurMs / todaySessions.length) : 0,
+      avgFocusScore: todaySessions.length > 0 ? Math.round(todayScoreSum / todaySessions.length) : 0,
+      bestFocusTimeWindow: todaySessions.length > 0 ? `${Math.max(...todaySessions.map(x => x.focus_score || 0))}pts` : "Not enough data",
+      totalDistractions: todaySessions.reduce((acc, s) => acc + (s.drowsy_count || 0) + (s.head_turned_count || 0) + (s.face_missing_count || 0) + (s.unauthorized_count || 0) + (s.high_noise_count || 0), 0),
+      streakDays: currentStreak,
+      longestStreak: currentStreak, // Keeping simple for now
+      streakDots,
+      peakZoneDisplay: peakZone || "—",
+      dailyData: days,
+      totalFocusedMs: totalFocusedMs,
+      totalDistractedMs: distMs,
+      recentSessionDurations: sessionDurations.slice(-7),
+      isSessionTrendUp: trendUp,
+      distractionHourData: hourDistractions.map((val, idx) => ({ name: idx.toString(), value: val }))
+    }
+  }, [sessions])
+
+  const {
+    totalStudyMs,
+    totalSessions,
+    insightMessage,
+    avgSessionMs,
+    avgFocusScore,
+    bestFocusTimeWindow,
+    totalDistractions,
+    streakDays,
+    longestStreak,
+    streakDots,
+    peakZoneDisplay,
+    dailyData,
+    totalFocusedMs,
+    totalDistractedMs,
+    recentSessionDurations,
+    isSessionTrendUp,
+    distractionHourData
+  } = stats
 
   // Fetch Today's Insight (once per day, cached in localStorage)
   useEffect(() => {
@@ -396,13 +341,16 @@ export default function DashboardHome() {
           }
         }
       } catch {
-        // silently fail — insight is non-critical
+        // silently fail
       } finally {
         setTodayInsightLoading(false)
       }
     }
     fetchInsight()
   }, [user?.id])
+
+  if (!user) return null
+
 
   // Compute productivity distribution from real data
   const productivePercent = totalStudyMs > 0 ? Math.round((totalFocusedMs / totalStudyMs) * 100) : 0
