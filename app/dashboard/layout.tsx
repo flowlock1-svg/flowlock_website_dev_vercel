@@ -49,15 +49,37 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
       if (isLoading) return
+
+      if (isAuthenticated) {
+        // User confirmed authenticated — clear the flag
+        sessionStorage.removeItem('flowlock_just_logged_in')
+        return
+      }
+
+      // Not authenticated — but check if we just logged in
+      // If so, give initSession more time to confirm the session
+      const justLoggedIn = sessionStorage.getItem('flowlock_just_logged_in')
       
-      if (!isAuthenticated) {
-        // Small delay ensures we don't redirect during 
-        // React's state commit between isLoading and isAuthenticated
+      if (justLoggedIn) {
+        // Give initSession up to 5 seconds to confirm the session
+        // before deciding the user is truly logged out
         const timer = setTimeout(() => {
-          window.location.replace('/login')
-        }, 500)
+          // Check one more time after waiting
+          if (!isAuthenticated) {
+            sessionStorage.removeItem('flowlock_just_logged_in')
+            window.location.replace('/login')
+          }
+        }, 5000)
         return () => clearTimeout(timer)
       }
+
+      // No login flag — user is genuinely not authenticated
+      // Use short delay to handle normal React state settling
+      const timer = setTimeout(() => {
+        window.location.replace('/login')
+      }, 500)
+      return () => clearTimeout(timer)
+
     }, [isLoading, isAuthenticated])
 
     if (isLoading) {

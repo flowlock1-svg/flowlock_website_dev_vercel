@@ -112,6 +112,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 // Set loading false IMMEDIATELY after setting authenticated
                 // so they always change together, never separately
                 setIsLoading(false)
+                // Clear the just-logged-in flag — session confirmed
+                sessionStorage.removeItem('flowlock_just_logged_in')
               } else {
                 setIsLoading(false)
               }
@@ -174,7 +176,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
 
       if (error) return { error: error.message }
-      if (!data.session) return { error: 'No session returned. Please try again.' }
+      if (!data.session) return { error: 'No session returned.' }
 
       const profile = await fetchProfile(data.session.user)
       if (profile) {
@@ -182,12 +184,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsAuthenticated(true)
       }
 
-      await new Promise(resolve => setTimeout(resolve, 100))
+      // SET THIS FLAG before navigating
+      // Tells the dashboard guard: "login just happened, 
+      // wait for initSession to confirm before redirecting"
+      sessionStorage.setItem('flowlock_just_logged_in', 'true')
+      
       window.location.replace('/dashboard')
       return {}
 
     } catch (err: any) {
-      return { error: err.message || 'Network error. Please try again.' }
+      return { error: err.message || 'Network error.' }
     }
   }
 
