@@ -19,33 +19,22 @@ export function LoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setError("")
+    alert('FORM: handleSubmit fired')
+    setError('')
     setIsSubmitting(true)
 
     try {
-      if (isSignup) {
-        if (!name.trim()) {
-          setError("Please enter your full name.")
-          setIsSubmitting(false)
-          return
-        }
-        const result = await signup(email, password, name)
-        if (result.error) {
-          setError(result.error)
-          setIsSubmitting(false)
-        }
-      } else {
-        const result = await login(email, password)
-        if (result.error) {
-          setError(result.error)
-          setIsSubmitting(false)
-        }
-        // If no error, auth-provider handles navigation
-        // Do NOT call setIsSubmitting(false) on success — 
-        // component will unmount on redirect
+      alert('FORM: calling login() from useAuth...')
+      const result = await login(email, password)
+      alert('FORM: login() returned, error=' + (result.error ?? 'none'))
+      
+      if (result.error) {
+        setError(result.error)
+        setIsSubmitting(false)
       }
     } catch (err: any) {
-      setError(err.message || 'Unexpected error')
+      alert('FORM CATCH: ' + err.message)
+      setError(err.message)
       setIsSubmitting(false)
     }
   }
