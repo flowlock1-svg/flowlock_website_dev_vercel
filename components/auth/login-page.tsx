@@ -44,17 +44,12 @@ export function LoginPage({ onDemoLogin, onSignup }: LoginPageProps) {
           // Keep component unmounted or handled by other files
         }
       } else {
-        console.log('[LOGIN] 1. Button clicked, starting auth...')
-        console.log('[LOGIN] 2. Calling supabase.auth.signInWithPassword...')
-        
+        console.log('[LOGIN] Starting...')
         const { data, error } = await supabase.auth.signInWithPassword({
           email,
           password
         })
-
-        console.log('[LOGIN] 3. Auth returned:', { data, error })
-        console.log('[LOGIN] 4. Session:', data?.session ? 'EXISTS' : 'NULL')
-        console.log('[LOGIN] 5. User:', data?.user?.email ?? 'NULL')
+        console.log('[LOGIN] Result:', { data, error })
 
         if (error) {
           setError(error.message)
@@ -62,16 +57,15 @@ export function LoginPage({ onDemoLogin, onSignup }: LoginPageProps) {
           return
         }
 
-        if (!data.session) {
-          setError('Login succeeded but no session was created. Please try again.')
+        if (!data?.session) {
+          setError('No session returned. Please try again.')
           setIsSubmitting(false)
           return
         }
 
-        console.log('[LOGIN] 6. About to redirect...')
-        router.push('/dashboard')
-        console.log('[LOGIN] 7. Redirect called')
-        // Do NOT call setIsSubmitting(false) here, component will unmount
+        // Force full page navigation — bypasses any router/middleware issues
+        console.log('[LOGIN] Success, navigating...')
+        window.location.replace('/dashboard')
       }
     } catch (err: any) {
       console.error('[LOGIN] Unexpected error:', err)

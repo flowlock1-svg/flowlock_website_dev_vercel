@@ -20,6 +20,7 @@ import { useRouter, usePathname } from "next/navigation"
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import dynamic from "next/dynamic"
+import { supabase } from "@/utils/supabase/client"
 
 const FocusTracker = dynamic(
     () => import("@/components/dashboard/pages/focus-tracker").then(mod => mod.FocusTracker),
@@ -36,6 +37,7 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
     const isStudent = user?.role === "student"
 
     const [hasMountedTracker, setHasMountedTracker] = useState(false)
+    const [checking, setChecking] = useState(true)
 
     useEffect(() => {
         if (isStudent && (isOnFocusPage || isFocusActive)) {
@@ -48,12 +50,18 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
     const shouldMountTracker = hasMountedTracker
 
     useEffect(() => {
-        if (!isAuthenticated) {
-            router.push("/")
+      const checkAuth = async () => {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session) {
+          window.location.replace('/login')
+        } else {
+          setChecking(false)
         }
-    }, [isAuthenticated, router])
+      }
+      checkAuth()
+    }, [])
 
-    if (isLoading) {
+    if (checking || isLoading) {
         return (
             <div style={{
                 display: "flex",
