@@ -20,7 +20,7 @@ import {
   ReferenceLine,
 } from "recharts"
 import { Sparkles, Brain, Flame } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useEffect, useState, useMemo } from "react"
 import { supabase } from "@/utils/supabase/client"
 
 const MOTIVATIONAL_QUOTES = [
@@ -552,7 +552,7 @@ export default function DashboardHome() {
             <div className="h-10 mt-auto w-full -ml-2">
             {recentSessionDurations.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={recentSessionDurations.map((val, i) => ({ i, val }))}>
+                  <AreaChart data={recentSessionDurations.map((val: number, i: number) => ({ i, val }))}>
                     <defs>
                       <linearGradient id="colorTeal" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor="#14b8a6" stopOpacity={0.3}/>
@@ -626,7 +626,7 @@ export default function DashboardHome() {
             <div className="mt-auto pt-2 space-y-3 border-t border-border/50">
               <div className="flex items-center justify-between w-full pt-1">
                 {streakDots.length > 0 ? (
-                  streakDots.map((isActive, i) => (
+                  streakDots.map((isActive: boolean, i: number) => (
                     <div 
                       key={i} 
                       className={`w-3.5 h-3.5 rounded-full ${isActive ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.3)]' : 'bg-muted border border-muted-foreground/20'}`}
@@ -716,7 +716,7 @@ export default function DashboardHome() {
           <p className="text-sm text-muted-foreground mt-1">Study minutes per day</p>
         </CardHeader>
         <CardContent className="p-6 min-h-[300px]">
-          {dailyData.some(d => d.focusMin > 0) ? (
+          {dailyData.some((d: any) => d.focusMin > 0) ? (
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={dailyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" opacity={0.4} />
@@ -748,7 +748,7 @@ export default function DashboardHome() {
                 />
                 <ReferenceLine y={120} stroke="#8b5cf6" strokeDasharray="5 5" strokeWidth={1} />
                 <Bar dataKey="focusMin" radius={[4, 4, 0, 0]} isAnimationActive={false}>
-                  {dailyData.map((entry, index) => (
+                  {dailyData.map((entry: any, index: number) => (
                     <Cell key={`cell-${index}`} fill={index === 6 ? '#10b981' : 'var(--primary)'} fillOpacity={index === 6 ? 1 : 0.6} />
                   ))}
                 </Bar>

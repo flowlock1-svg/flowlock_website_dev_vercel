@@ -6,16 +6,10 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Loader2 } from "lucide-react"
-import { supabase } from "@/utils/supabase/client"
-import { useRouter } from "next/navigation"
+import { useAuth } from "@/components/providers/auth-provider"
 
-interface LoginPageProps {
-  onDemoLogin: () => void
-  onSignup: (email: string, password: string, name: string) => Promise<{ error?: string }>
-}
-
-export function LoginPage({ onDemoLogin, onSignup }: LoginPageProps) {
-  const router = useRouter()
+export function LoginPage() {
+  const { login, demoLogin, signup } = useAuth()
   const [isSignup, setIsSignup] = useState(false)
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -35,41 +29,23 @@ export function LoginPage({ onDemoLogin, onSignup }: LoginPageProps) {
           setIsSubmitting(false)
           return
         }
-        const result = await onSignup(email, password, name)
+        const result = await signup(email, password, name)
         if (result.error) {
           setError(result.error)
           setIsSubmitting(false)
-        } else {
-          // Signup redirects identically inside auth context usually, but if it doesn't:
-          // Keep component unmounted or handled by other files
         }
       } else {
-        console.log('[LOGIN] Starting...')
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email,
-          password
-        })
-        console.log('[LOGIN] Result:', { data, error })
-
-        if (error) {
-          setError(error.message)
+        const result = await login(email, password)
+        if (result.error) {
+          setError(result.error)
           setIsSubmitting(false)
-          return
         }
-
-        if (!data?.session) {
-          setError('No session returned. Please try again.')
-          setIsSubmitting(false)
-          return
-        }
-
-        // Force full page navigation — bypasses any router/middleware issues
-        console.log('[LOGIN] Success, navigating...')
-        window.location.replace('/dashboard')
+        // If no error, auth-provider handles navigation
+        // Do NOT call setIsSubmitting(false) on success — 
+        // component will unmount on redirect
       }
     } catch (err: any) {
-      console.error('[LOGIN] Unexpected error:', err)
-      setError(err.message || "An unexpected error occurred.")
+      setError(err.message || 'Unexpected error')
       setIsSubmitting(false)
     }
   }
@@ -183,7 +159,7 @@ export function LoginPage({ onDemoLogin, onSignup }: LoginPageProps) {
                   type="button"
                   variant="outline"
                   className="w-full"
-                  onClick={onDemoLogin}
+                  onClick={demoLogin}
                   disabled={isSubmitting}
                 >
                   Login as Demo User

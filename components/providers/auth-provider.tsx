@@ -84,14 +84,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const router = useRouter()
 
     useEffect(() => {
+        let mounted = true
         // Safety net: never stay in loading state longer than 3 seconds
-        const timeout = setTimeout(() => setIsLoading(false), 3000)
+        const timeout = setTimeout(() => {
+            if (mounted) setIsLoading(false)
+        }, 3000)
 
         // Guard: if env vars are missing, fail fast
         if (!supabase) {
             console.error("[Auth] Supabase client is null — NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY is missing. Check your .env.local file.")
             clearTimeout(timeout)
-            setIsLoading(false)
+            if (mounted) setIsLoading(false)
             return
         }
 
@@ -99,9 +102,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const initSession = async () => {
             try {
                 const { data: { session } } = await supabase.auth.getSession()
-                if (session?.user) {
+                if (session?.user && mounted) {
                     const profile = await fetchProfile(session.user)
-                    if (profile) {
+                    if (profile && mounted) {
                         setUser(profile)
                         setIsAuthenticated(true)
                     }
@@ -110,7 +113,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 console.error("Failed to initialize session:", error)
             } finally {
                 clearTimeout(timeout)
-                setIsLoading(false)
+                if (mounted) setIsLoading(false)
             }
         }
 
@@ -119,13 +122,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Listen for auth state changes (login, logout, token refresh)
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
             async (event, session) => {
-                if (event === "SIGNED_IN" && session?.user) {
+                if (event === "SIGNED_IN" && session?.user && mounted) {
                     const profile = await fetchProfile(session.user)
-                    if (profile) {
+                    if (profile && mounted) {
                         setUser(profile)
                         setIsAuthenticated(true)
                     }
-                } else if (event === "SIGNED_OUT") {
+                } else if (event === "SIGNED_OUT" && mounted) {
                     setUser(null)
                     setIsAuthenticated(false)
                 }
@@ -133,39 +136,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         )
 
         return () => {
+            mounted = false
             clearTimeout(timeout)
             subscription.unsubscribe()
         }
     }, [])
 
-    const login = async (email: string, password: string): Promise<{ error?: string }> => {
-        if (!supabase) {
-            return { error: "Missing database configuration. Please add Supabase environment variables to Vercel and redeploy." }
+    const login = async (
+      email: string, 
+      password: string
+    ): Promise<{ error?: string }> => {
+      if (!supabase) {
+        return { error: 'Missing Supabase configuration.' }
+      }
+
+      try {
+        const { data, error } = await supabase.auth.signInWithPassword({ 
+          email, 
+          password 
+        })
+
+        if (error) return { error: error.message }
+
+        if (!data.session) {
+          return { error: 'No session returned. Please try again.' }
         }
 
-        try {
-            console.log('[LOGIN] Attempting sign in...')
-            const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-            console.log('[LOGIN] Result:', { data, error })
-            console.log('[LOGIN] Session:', data?.session)
-            console.log('[LOGIN] User:', data?.user)
+        // Let onAuthStateChange handle setting user state
+        // Just navigate directly here
+        window.location.replace('/dashboard')
+        return {}
 
-            if (error) return { error: error.message }
-
-            if (data.session?.user) {
-                const profile = await fetchProfile(data.session.user)
-                if (profile) {
-                    setUser(profile)
-                    setIsAuthenticated(true)
-                }
-            }
-            
-            router.push("/dashboard")
-            console.log('[LOGIN] Redirect fired')
-            return {}
-        } catch (err: any) {
-            return { error: err.message || "Network connection failed. Please disable your adblocker or firewall." }
-        }
+      } catch (err: any) {
+        return { error: err.message || 'Network error. Please try again.' }
+      }
     }
 
     const demoLogin = () => {
