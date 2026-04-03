@@ -14,6 +14,7 @@ import { usePomodoro } from "@/components/providers/pomodoro-provider"
 import { supabase } from "@/utils/supabase/client"
 import { toast } from "sonner"
 import { useFaceAuth } from "@/hooks/use-face-auth"
+import { useSessions } from "@/components/providers/session-provider"
 
 // Session result data passed to parent
 export interface FocusSessionResult {
@@ -69,6 +70,7 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
     const { user } = useAuth()
     const { startFocusSession, isFocusActive, focusElapsed, targetDuration, setFocusElapsed, stopFocusSession, setLastFocusSession } = useFocus()
     const { updateBreakState, completeSession } = usePomodoro()
+    const { fetchSessionStats } = useSessions()
     const router = useRouter()
     const {
         loadModels,
@@ -675,7 +677,9 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
                         high_noise_count: noiseState.highNoiseCount
                     })
                     if (error) throw error
-                    // Success is silent by design here
+                    
+                    // Fetch directly from the root layout context to update dashboard stats
+                    await fetchSessionStats()
                 } catch (err) {
                     console.error('Session save failed silently:', err)
                     toast.error("Sync failed — data saved locally", { duration: 3000 })
@@ -691,7 +695,7 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
                       : "Tough session? Rest up and keep going!"
             toast.success(msg, { duration: 4000, position: "top-center" })
         }
-    }, [onSessionComplete, stopFocusSession, completeSession, targetDuration, updateBreakState, user, setLastFocusSession, noiseState.highNoiseCount, updateStatusUI, stopNoise])
+    }, [onSessionComplete, stopFocusSession, completeSession, targetDuration, updateBreakState, user, setLastFocusSession, noiseState.highNoiseCount, updateStatusUI, stopNoise, fetchSessionStats])
 
     // STEP 5 — PDF generation moved to on-demand only
     const handleDownloadReport = async () => {

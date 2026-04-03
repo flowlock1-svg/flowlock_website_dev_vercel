@@ -201,6 +201,8 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
     )
 }
 
+import { SessionProvider } from "@/components/providers/session-provider"
+
 export default function DashboardLayout({
     children,
 }: {
@@ -209,8 +211,10 @@ export default function DashboardLayout({
     return (
         <PomodoroProvider>
             <FocusProvider>
-                <BreakOverlay />
-                <DashboardInner>{children}</DashboardInner>
+                <SessionProvider>
+                    <BreakOverlay />
+                    <DashboardInner>{children}</DashboardInner>
+                </SessionProvider>
             </FocusProvider>
         </PomodoroProvider>
     )

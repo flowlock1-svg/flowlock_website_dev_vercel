@@ -65,6 +65,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 
 import { useAuth } from "@/components/providers/auth-provider"
 import { useFocus } from "@/components/providers/focus-provider"
+import { useSessions } from "@/components/providers/session-provider"
 
 // Helper: ms to hours
 function msToHours(ms: number) {
@@ -79,6 +80,8 @@ function msToMinutes(ms: number) {
 export default function DashboardHome() {
   const { user } = useAuth()
   const { lastFocusSession } = useFocus()
+  const { sessions, loading: sessionsLoading } = useSessions()
+
   const [isLoading, setIsLoading] = useState(true)
   const [dailyData, setDailyData] = useState<any[]>([])
   const [totalStudyMs, setTotalStudyMs] = useState(0)
@@ -142,6 +145,10 @@ export default function DashboardHome() {
 
   useEffect(() => {
     if (!user?.id) return;
+    if (sessionsLoading) {
+      setIsLoading(true)
+      return
+    }
 
     const computeAndSetStats = (allSessions: any[]) => {
         const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
@@ -347,55 +354,8 @@ export default function DashboardHome() {
         setIsLoading(false)
     }
 
-    async function fetchSessionStats(userId: string) {
-      setIsLoading(true)
-      
-      // LocalStorage caching
-      if (typeof localStorage !== 'undefined') {
-        const cache = localStorage.getItem('flowlock_stats_cache')
-        if (cache) {
-          try {
-            const { sessions, cached_at } = JSON.parse(cache)
-            const ageHours = (Date.now() - new Date(cached_at).getTime()) / 3600000
-            if (ageHours < 24 && Array.isArray(sessions)) {
-              computeAndSetStats(sessions)
-            }
-          } catch(e) {}
-        }
-      }
-
-      try {
-        const { data: allSessions, error } = await supabase
-          .from("study_sessions")
-          .select("*")
-          .eq("user_id", userId)
-          .order("started_at", { ascending: false })
-
-        if (error) {
-          console.error("Dashboard fetch failed:", error)
-          setIsLoading(false)
-          return
-        }
-
-        console.log("[DASHBOARD AUDIT] Raw Supabase Data Array:", allSessions)
-
-        if (typeof localStorage !== 'undefined') {
-          localStorage.setItem('flowlock_stats_cache', JSON.stringify({
-            sessions: allSessions || [],
-            cached_at: new Date().toISOString()
-          }))
-        }
-
-        computeAndSetStats(allSessions || [])
-
-      } catch (e) {
-        console.error("Failed to fetch dashboard data:", e)
-        setIsLoading(false)
-      }
-    }
-
-    fetchSessionStats(user.id)
-  }, [user?.id, lastFocusSession])
+    computeAndSetStats(sessions || [])
+  }, [user?.id, sessions, sessionsLoading])
 
   // Fetch Today's Insight (once per day, cached in localStorage)
   useEffect(() => {
