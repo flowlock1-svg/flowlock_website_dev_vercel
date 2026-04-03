@@ -70,7 +70,7 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
     const { user } = useAuth()
     const { startFocusSession, isFocusActive, focusElapsed, targetDuration, setFocusElapsed, stopFocusSession, setLastFocusSession } = useFocus()
     const { updateBreakState, completeSession } = usePomodoro()
-    const { fetchSessionStats } = useSessions()
+    const { fetchSessionStats, sessions } = useSessions()
     const router = useRouter()
     const {
         loadModels,
@@ -679,7 +679,9 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
                     if (error) throw error
                     
                     // Fetch directly from the root layout context to update dashboard stats
+                    console.log('[SYNC] Insert success, sessions in context before refetch:', sessions?.length)
                     await fetchSessionStats()
+                    console.log('[SYNC] fetchSessionStats() completed, sessions in context after refetch:', sessions?.length)
                 } catch (err) {
                     console.error('Session save failed silently:', err)
                     toast.error("Sync failed — data saved locally", { duration: 3000 })

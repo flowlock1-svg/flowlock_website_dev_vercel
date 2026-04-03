@@ -107,6 +107,8 @@ export default function DashboardHome() {
   const [todayInsight, setTodayInsight] = useState<string | null>(null)
   const [todayInsightLoading, setTodayInsightLoading] = useState(false)
 
+  console.log('[DASHBOARD] Rendering, sessions count:', sessions?.length, 'stats:', { totalSessions, avgFocusScore })
+
   useEffect(() => {
     if (user === null && typeof localStorage !== 'undefined') {
       localStorage.removeItem('flowlock_stats_cache')
