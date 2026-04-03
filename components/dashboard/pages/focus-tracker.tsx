@@ -566,188 +566,206 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
 
     // Stop session
     const handleStop = useCallback(async () => {
-        isRunningRef.current = false
-        if (animationIdRef.current) cancelAnimationFrame(animationIdRef.current)
-        if (durationIntervalRef.current) clearInterval(durationIntervalRef.current)
-        if (authIntervalRef.current) clearInterval(authIntervalRef.current)
+        let computedResult: FocusSessionResult | null = null;
+        try {
+            isRunningRef.current = false
+            if (animationIdRef.current) cancelAnimationFrame(animationIdRef.current)
+            if (durationIntervalRef.current) clearInterval(durationIntervalRef.current)
+            if (authIntervalRef.current) clearInterval(authIntervalRef.current)
 
-        // Stop noise detection
-        stopNoise()
+            // Stop noise detection
+            stopNoise()
 
-        // Stop camera
-        if (videoRef.current?.srcObject) {
-            const tracks = (videoRef.current.srcObject as MediaStream).getTracks()
-            tracks.forEach((track) => track.stop())
-            videoRef.current.srcObject = null
-        }
-
-        // Calculate results
-        const now = Date.now()
-        const totalDuration = now - startTimeRef.current
-
-        let drowsyDuration = 0
-        let headDuration = 0
-        let faceDuration = 0
-        let unauthorizedDuration = 0
-        let lastEvent: any = null
-
-        historyRef.current.forEach((e) => {
-            if (e.start) {
-                lastEvent = e
-            } else if (lastEvent && lastEvent.type === e.type) {
-                const dur = e.time - lastEvent.time
-                if (e.type === "DROWSY") drowsyDuration += dur
-                if (e.type === "HEAD_TURNED") headDuration += dur
-                if (e.type === "FACE_MISSING") faceDuration += dur
-                if (e.type === "UNAUTHORIZED") unauthorizedDuration += dur
-                lastEvent = null
+            // Stop camera
+            if (videoRef.current?.srcObject) {
+                const tracks = (videoRef.current.srcObject as MediaStream).getTracks()
+                tracks.forEach((track) => track.stop())
+                videoRef.current.srcObject = null
             }
-        })
 
-        if (lastEvent) {
-            const dur = now - lastEvent.time
-            if (lastEvent.type === "DROWSY") drowsyDuration += dur
-            if (lastEvent.type === "HEAD_TURNED") headDuration += dur
-            if (lastEvent.type === "FACE_MISSING") faceDuration += dur
-            if (lastEvent.type === "UNAUTHORIZED") unauthorizedDuration += dur
-        }
+            // Calculate results
+            const now = Date.now()
+            const totalDuration = now - startTimeRef.current
 
-        const distractedTime = drowsyDuration + headDuration + faceDuration + unauthorizedDuration
-        const focusedTime = Math.max(0, totalDuration - distractedTime)
-        const score = Math.round((focusedTime / totalDuration) * 100) || 0
+            let drowsyDuration = 0
+            let headDuration = 0
+            let faceDuration = 0
+            let unauthorizedDuration = 0
+            let lastEvent: any = null
 
-        const sessionResult: FocusSessionResult = {
-            score,
-            duration: totalDuration,
-            drowsyCount: statsRef.current.drowsyCount,
-            headTurnedCount: statsRef.current.headTurnedCount,
-            faceMissingCount: statsRef.current.faceMissingCount,
-            unauthorizedCount: statsRef.current.unauthorizedCount,
-            highNoiseCount: noiseState.highNoiseCount,
-            focusedTime,
-            drowsyTime: drowsyDuration,
-            headTurnedTime: headDuration,
-            faceMissingTime: faceDuration,
-            unauthorizedTime: unauthorizedDuration,
-        }
-
-        // Persist session to Supabase (with validation to prevent bogus data)
-        const MAX_SESSION_MS = 24 * 60 * 60 * 1000 // 24 hours max
-        
-        console.log("=== FOCUS SESSION END ===");
-        console.log("Validating session parameters:", {
-            hasSupabase: !!supabase,
-            userId: user?.id,
-            startTime: startTimeRef.current,
-            totalDuration,
-            isValidDuration: totalDuration > 0 && totalDuration < MAX_SESSION_MS
-        });
-
-        if (supabase && user?.id && startTimeRef.current > 0 && totalDuration > 0 && totalDuration < MAX_SESSION_MS) {
-            try {
-                const startedAt = new Date(startTimeRef.current).toISOString()
-                const endedAt = new Date(now).toISOString()
-                
-                console.log("Attempting to save session to Supabase table 'study_sessions'...");
-                
-                const { error, data } = await supabase.from("study_sessions").insert({
-                    user_id: user.id,
-                    started_at: startedAt,
-                    ended_at: endedAt,
-                    duration_ms: totalDuration,
-                    focus_score: score,
-                    focused_time_ms: focusedTime,
-                    drowsy_count: statsRef.current.drowsyCount,
-                    drowsy_time_ms: drowsyDuration,
-                    head_turned_count: statsRef.current.headTurnedCount,
-                    head_turned_time_ms: headDuration,
-                    face_missing_count: statsRef.current.faceMissingCount,
-                    face_missing_time_ms: faceDuration,
-                    unauthorized_count: statsRef.current.unauthorizedCount,
-                    unauthorized_time_ms: unauthorizedDuration,
-                    high_noise_count: noiseState.highNoiseCount,
-                }).select()
-                
-                if (error) {
-                    console.error("🚨 Failed to save session to Supabase:", error)
-                    console.error("Error details:", JSON.stringify(error, null, 2))
-                } else {
-                    console.log("✅ Session saved successfully:", data)
+            historyRef.current.forEach((e) => {
+                if (e.start) {
+                    lastEvent = e
+                } else if (lastEvent && lastEvent.type === e.type) {
+                    const dur = e.time - lastEvent.time
+                    if (e.type === "DROWSY") drowsyDuration += dur
+                    if (e.type === "HEAD_TURNED") headDuration += dur
+                    if (e.type === "FACE_MISSING") faceDuration += dur
+                    if (e.type === "UNAUTHORIZED") unauthorizedDuration += dur
+                    lastEvent = null
                 }
-            } catch (err) {
-                console.error("🚨 Supabase insert crashed:", err)
+            })
+
+            if (lastEvent) {
+                const dur = now - lastEvent.time
+                if (lastEvent.type === "DROWSY") drowsyDuration += dur
+                if (lastEvent.type === "HEAD_TURNED") headDuration += dur
+                if (lastEvent.type === "FACE_MISSING") faceDuration += dur
+                if (lastEvent.type === "UNAUTHORIZED") unauthorizedDuration += dur
             }
-        } else {
-             console.log("Session not saved because validation failed. Check above logs.");
-        }
 
-        setResult(sessionResult)
-        setPhase("results")
+            const distractedTime = drowsyDuration + headDuration + faceDuration + unauthorizedDuration
+            const focusedTime = Math.max(0, totalDuration - distractedTime)
+            const score = Math.round((focusedTime / totalDuration) * 100) || 0
 
-        // Call Pomodoro completion logic
-        // If there was a target duration, use it (converted to mins). Else use actual duration.
-        const intendedDurationMins = targetDuration ? targetDuration / 60 : totalDuration / 60000
-        completeSession(intendedDurationMins)
-
-        // Force hide the auto-popup break overlay so our custom results phase is visible!
-        updateBreakState(false)
-
-        // Signal to provider that session ended
-        stopFocusSession()
-
-        // Show motivational message if user opted in
-        if (typeof localStorage !== "undefined" && localStorage.getItem("pref_motivational_messages") === "true") {
-            const highScoreMessages = [
-                "🌟 Phenomenal focus! You're unstoppable — keep up the great work!",
-                "🔥 Outstanding session! Your dedication is truly inspiring.",
-                "💪 You crushed it! That level of focus is what champions are made of.",
-                "🚀 Incredible work! Every session like this brings you closer to your goals.",
-                "🏆 Top-tier performance! You should be proud of your concentration.",
-                "✨ Brilliant focus! You make hard things look easy. Keep it up!",
-            ]
-            const midScoreMessages = [
-                "👍 Solid session! You're building great habits — consistency is key.",
-                "📈 Good effort! Every session is a step forward. Keep going!",
-                "💡 Nice work! A little more focus each day and you'll be unstoppable.",
-                "🌱 Growing stronger! Each session plants the seeds of success.",
-                "⚡ Good session! Stay consistent and watch yourself improve every day.",
-                "🎯 You're on track! Progress, not perfection — you're doing great.",
-            ]
-            const lowScoreMessages = [
-                "🌤️ Every expert was once a beginner. Tomorrow is a fresh start!",
-                "💪 Don't be discouraged — every session teaches you something new.",
-                "🔄 Tough session? That's okay! What matters is that you showed up.",
-                "🌱 Growth takes time. Keep going — you're building something great.",
-                "🧠 Distracted days happen. Rest up and come back stronger tomorrow!",
-                "🎯 The comeback is always stronger than the setback. Keep pushing!",
-            ]
-
-            let pool: string[]
-            if (score >= 80) pool = highScoreMessages
-            else if (score >= 50) pool = midScoreMessages
-            else pool = lowScoreMessages
-
-            const msg = pool[Math.floor(Math.random() * pool.length)]
-
-            if ("Notification" in window && Notification.permission === "granted") {
-                new Notification("Great session, champ! 🎉", { body: msg })
+            computedResult = {
+                score,
+                duration: totalDuration,
+                drowsyCount: statsRef.current.drowsyCount,
+                headTurnedCount: statsRef.current.headTurnedCount,
+                faceMissingCount: statsRef.current.faceMissingCount,
+                unauthorizedCount: statsRef.current.unauthorizedCount,
+                highNoiseCount: noiseState.highNoiseCount,
+                focusedTime,
+                drowsyTime: drowsyDuration,
+                headTurnedTime: headDuration,
+                faceMissingTime: faceDuration,
+                unauthorizedTime: unauthorizedDuration,
             }
-            toast.success(msg, { duration: 6000, position: "top-center" })
+
+            // Persist session to Supabase (Decoupled & Non-blocking)
+            const MAX_SESSION_MS = 24 * 60 * 60 * 1000 // 24 hours max
+            
+            console.log("=== FOCUS SESSION END ===");
+            console.log("Validating session parameters:", {
+                hasSupabase: !!supabase,
+                userId: user?.id,
+                startTime: startTimeRef.current,
+                totalDuration,
+                isValidDuration: totalDuration > 0 && totalDuration < MAX_SESSION_MS
+            });
+
+            if (supabase && user?.id && startTimeRef.current > 0 && totalDuration > 0 && totalDuration < MAX_SESSION_MS) {
+                const saveToSupabase = async () => {
+                    try {
+                        const startedAt = new Date(startTimeRef.current).toISOString()
+                        const endedAt = new Date(now).toISOString()
+                        
+                        console.log("Attempting to save session to Supabase table 'study_sessions'...");
+                        
+                        const { error, data } = await supabase.from("study_sessions").insert({
+                            user_id: user.id,
+                            started_at: startedAt,
+                            ended_at: endedAt,
+                            duration_ms: totalDuration,
+                            focus_score: score,
+                            focused_time_ms: focusedTime,
+                            drowsy_count: statsRef.current.drowsyCount,
+                            drowsy_time_ms: drowsyDuration,
+                            head_turned_count: statsRef.current.headTurnedCount,
+                            head_turned_time_ms: headDuration,
+                            face_missing_count: statsRef.current.faceMissingCount,
+                            face_missing_time_ms: faceDuration,
+                            unauthorized_count: statsRef.current.unauthorizedCount,
+                            unauthorized_time_ms: unauthorizedDuration,
+                            high_noise_count: noiseState.highNoiseCount,
+                        }).select()
+                        
+                        if (error) {
+                            console.error("🚨 Failed to save session to Supabase:", error)
+                        } else {
+                            console.log("✅ Session saved successfully:", data)
+                        }
+                    } catch (err) {
+                        console.error("🚨 Supabase insert crashed:", err)
+                    }
+                }
+                saveToSupabase() // Fire and forget so we don't block UI transition
+            } else {
+                 console.log("Session not saved because validation failed. Check logs.");
+            }
+
+            // Call Pomodoro completion logic
+            const intendedDurationMins = targetDuration ? targetDuration / 60 : totalDuration / 60000
+            completeSession(intendedDurationMins)
+
+            // Force hide the auto-popup break overlay so our custom results phase is visible!
+            updateBreakState(false)
+
+            // Signal to provider that session ended
+            stopFocusSession()
+
+            // Show motivational message if user opted in
+            if (typeof localStorage !== "undefined" && localStorage.getItem("pref_motivational_messages") === "true") {
+                const highScoreMessages = [
+                    "🌟 Phenomenal focus! You're unstoppable — keep up the great work!",
+                    "🔥 Outstanding session! Your dedication is truly inspiring.",
+                    "🏆 Top-tier performance! You should be proud of your concentration.",
+                ]
+                const midScoreMessages = [
+                    "👍 Solid session! You're building great habits — consistency is key.",
+                    "📈 Good effort! Every session is a step forward. Keep going!",
+                    "🌱 Growing stronger! Each session plants the seeds of success.",
+                ]
+                const lowScoreMessages = [
+                    "🌤️ Every expert was once a beginner. Tomorrow is a fresh start!",
+                    "🔄 Tough session? That's okay! What matters is that you showed up.",
+                    "🎯 The comeback is always stronger than the setback. Keep pushing!",
+                ]
+
+                let pool: string[]
+                if (score >= 80) pool = highScoreMessages
+                else if (score >= 50) pool = midScoreMessages
+                else pool = lowScoreMessages
+
+                const msg = pool[Math.floor(Math.random() * pool.length)]
+
+                if ("Notification" in window && Notification.permission === "granted") {
+                    new Notification("Great session, champ! 🎉", { body: msg })
+                }
+                toast.success(msg, { duration: 6000, position: "top-center" })
+            }
+
+            if (onSessionComplete) {
+                onSessionComplete(computedResult)
+            }
+
+            // Update the dashboard instantly with this session
+            setLastFocusSession(computedResult)
+            
+            // Generate the PDF report
+            try {
+                // Ignore typescript error since it's defined out of bounds of this callback block but still physically loaded
+                // @ts-ignore
+                if (typeof generateAndDownloadPDF === 'function') {
+                    // @ts-ignore
+                    await generateAndDownloadPDF(computedResult)
+                }
+            } catch (pdfErr) {
+                console.error("PDF generation failed:", pdfErr)
+            }
+
+        } catch (error: any) {
+            console.error("🔥 EXCEPTION CAUGHT IN handleStop:");
+            console.error(error.stack || error);
+            
+            if (!computedResult) {
+                computedResult = {
+                    score: 0, duration: 1, drowsyCount: 0, headTurnedCount: 0, faceMissingCount: 0,
+                    unauthorizedCount: 0, highNoiseCount: 0, focusedTime: 0, drowsyTime: 0, 
+                    headTurnedTime: 0, faceMissingTime: 0, unauthorizedTime: 0
+                }
+            }
+        } finally {
+            // GUARANTEED UI transition logic
+            if (computedResult) {
+                setResult(computedResult)
+            }
+            setPhase("results")
+            isRunningRef.current = false
+            updateStatusUI("Session Complete", "neutral")
         }
-
-        if (onSessionComplete) {
-            onSessionComplete(sessionResult)
-        }
-
-        // Update the dashboard instantly with this session
-        setLastFocusSession(sessionResult)
-        
-        // Generate the PDF report
-        await generateAndDownloadPDF(sessionResult)
-
-        // Route to the dashboard so stats are updated visually
-        // (Removing router.push here so the user can see the detailed "results" phase on the focus tracker page instead)
-    }, [onSessionComplete, router, setLastFocusSession])
+    }, [onSessionComplete, router, setLastFocusSession, stopFocusSession, completeSession, targetDuration, updateBreakState, user, noiseState.highNoiseCount])
 
     const generateAndDownloadPDF = async (sessionData: FocusSessionResult) => {
         try {
