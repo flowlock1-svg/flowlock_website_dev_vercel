@@ -57,39 +57,39 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
     const shouldMountTracker = hasMountedTracker
 
     useEffect(() => {
-      if (isLoading) return
+    // Still loading — never redirect
+    if (isLoading) return
 
-      if (isAuthenticated) {
-        // User confirmed authenticated — clear the flag
-        sessionStorage.removeItem('flowlock_just_logged_in')
-        return
-      }
+    // Authenticated — we're good
+    if (isAuthenticated) {
+      sessionStorage.removeItem('flowlock_just_logged_in')
+      return
+    }
 
-      // Not authenticated — but check if we just logged in
-      // If so, give initSession more time to confirm the session
-      const justLoggedIn = sessionStorage.getItem('flowlock_just_logged_in')
-      
-      if (justLoggedIn) {
-        // Give initSession up to 5 seconds to confirm the session
-        // before deciding the user is truly logged out
-        const timer = setTimeout(() => {
-          // Check one more time after waiting
-          if (!isAuthenticated) {
-            sessionStorage.removeItem('flowlock_just_logged_in')
-            window.location.replace('/login')
-          }
-        }, 5000)
-        return () => clearTimeout(timer)
-      }
-
-      // No login flag — user is genuinely not authenticated
-      // Use short delay to handle normal React state settling
-      const timer = setTimeout(() => {
+    // Not authenticated after loading finished
+    // Double-check directly with Supabase before redirecting
+    // This is the critical fix for hard refresh
+    const verifyAndRedirect = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (session) {
+          // Valid session exists — context just hasn't updated yet
+          // Do NOT redirect. Wait for onAuthStateChange to fire.
+          console.log('[GUARD] Session valid, waiting for context update')
+          return
+        }
+        // No session anywhere — safe to redirect
+        console.log('[GUARD] No session, redirecting to login')
         window.location.replace('/login')
-      }, 500)
-      return () => clearTimeout(timer)
+      } catch (err) {
+        // Network error — don't redirect, give benefit of doubt
+        console.error('[GUARD] Session check error:', err)
+      }
+    }
 
-    }, [isLoading, isAuthenticated])
+    verifyAndRedirect()
+
+  }, [isLoading, isAuthenticated])
 
     if (isLoading) {
       return (

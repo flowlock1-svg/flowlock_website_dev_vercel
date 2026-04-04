@@ -38,42 +38,62 @@ function getSpotifyEnabled(): boolean {
 
 async function fetchProfile(supaUser: User): Promise<AuthUser | null> {
     try {
-        const { data, error } = await supabase
-            .from("profiles")
-            .select("full_name, email, role")
-            .eq("id", supaUser.id)
-            .single()
+      const profilePromise = supabase
+        .from('profiles')
+        .select('full_name, email, role')
+        .eq('id', supaUser.id)
+        .single()
 
-        if (!error && data) {
-            return {
-                id: supaUser.id,
-                name: data.full_name || supaUser.user_metadata?.full_name || "",
-                email: data.email,
-                role: data.role as "student" | "admin",
-                isSpotifyLinked: getSpotifyEnabled(),
-            }
-        }
+      // Race against a 3 second timeout
+      const timeoutPromise = new Promise<null>((resolve) => 
+        setTimeout(() => resolve(null), 3000)
+      )
 
-        // Fallback: profile row doesn't exist yet (new signup) or query failed
-        // Use auth metadata instead of blocking login
-        console.warn("[Auth] Profile fetch failed, using auth metadata fallback:", error?.message)
+      const result = await Promise.race([profilePromise, timeoutPromise])
+      
+      // If timed out, result is null — use fallback
+      if (!result || !('data' in result)) {
+        console.warn('[Auth] fetchProfile timed out, using fallback')
         return {
-            id: supaUser.id,
-            name: supaUser.user_metadata?.full_name || supaUser.email?.split("@")[0] || "User",
-            email: supaUser.email || "",
-            role: (supaUser.user_metadata?.role as "student" | "admin") || "student",
-            isSpotifyLinked: getSpotifyEnabled(),
+          id: supaUser.id,
+          name: supaUser.user_metadata?.full_name || 
+                supaUser.email?.split('@')[0] || 'User',
+          email: supaUser.email || '',
+          role: 'student',
+          isSpotifyLinked: getSpotifyEnabled()
         }
+      }
+
+      const { data, error } = result
+      if (!error && data) {
+        return {
+          id: supaUser.id,
+          name: data.full_name || supaUser.user_metadata?.full_name || '',
+          email: data.email,
+          role: data.role as 'student' | 'admin',
+          isSpotifyLinked: getSpotifyEnabled()
+        }
+      }
+
+      // Query failed — use auth metadata fallback
+      return {
+        id: supaUser.id,
+        name: supaUser.user_metadata?.full_name || 
+              supaUser.email?.split('@')[0] || 'User',
+        email: supaUser.email || '',
+        role: 'student',
+        isSpotifyLinked: getSpotifyEnabled()
+      }
+
     } catch (err) {
-        console.error("[Auth] fetchProfile crashed:", err)
-        // Still allow login with minimal info
-        return {
-            id: supaUser.id,
-            name: supaUser.email?.split("@")[0] || "User",
-            email: supaUser.email || "",
-            role: "student",
-            isSpotifyLinked: getSpotifyEnabled(),
-        }
+      console.error('[Auth] fetchProfile crashed:', err)
+      return {
+        id: supaUser.id,
+        name: supaUser.email?.split('@')[0] || 'User',
+        email: supaUser.email || '',
+        role: 'student',
+        isSpotifyLinked: getSpotifyEnabled()
+      }
     }
 }
 
@@ -103,30 +123,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const initSession = async () => {
           try {
             const { data: { session } } = await supabase.auth.getSession()
+            
             if (session?.user && mounted) {
               resolvingProfile.current = true
               const profile = await fetchProfile(session.user)
-              if (profile && mounted) {
-                setUser(profile)
-                setIsAuthenticated(true)
-                // Set loading false IMMEDIATELY after setting authenticated
-                // so they always change together, never separately
-                setIsLoading(false)
-                // Clear the just-logged-in flag — session confirmed
-                sessionStorage.removeItem('flowlock_just_logged_in')
-              } else {
-                setIsLoading(false)
-              }
               resolvingProfile.current = false
-            } else {
-              // No session — user is genuinely logged out
-              setIsLoading(false)
+              
+              if (mounted) {
+                if (profile) {
+                  setUser(profile)
+                  setIsAuthenticated(true)
+                } else {
+                  // fetchProfile failed but session is valid
+                  // Set a minimal user to prevent redirect
+                  setUser({
+                    id: session.user.id,
+                    name: session.user.email?.split('@')[0] || 'User',
+                    email: session.user.email || '',
+                    role: 'student',
+                    isSpotifyLinked: false
+                  })
+                  setIsAuthenticated(true)
+                }
+              }
             }
           } catch (error) {
             console.error('Failed to initialize session:', error)
-            setIsLoading(false)
           } finally {
+            // Always runs last — isAuthenticated already set above
             clearTimeout(timeout)
+            if (mounted) setIsLoading(false)
           }
         }
 
