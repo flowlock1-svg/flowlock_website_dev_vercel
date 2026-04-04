@@ -14,6 +14,7 @@ import { usePomodoro } from "@/components/providers/pomodoro-provider"
 import { supabase } from "@/utils/supabase/client"
 import { toast } from "sonner"
 import { useFaceAuth } from "@/hooks/use-face-auth"
+import { useStudySessions } from "@/hooks/use-study-sessions"
 
 // Session result data passed to parent
 export interface FocusSessionResult {
@@ -69,6 +70,7 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
     const { user } = useAuth()
     const { startFocusSession, isFocusActive, focusElapsed, targetDuration, setFocusElapsed, stopFocusSession, setLastFocusSession } = useFocus()
     const { updateBreakState, completeSession } = usePomodoro()
+    const { refetch } = useStudySessions()
     const router = useRouter()
     const {
         loadModels,
@@ -676,7 +678,12 @@ export function FocusTracker({ onSessionComplete, visible = true }: FocusTracker
                     })
                     if (error) throw error
                     
-                    console.log('[SAVE] Session inserted — Realtime will sync dashboard')
+                    console.log('[SAVE] Insert success')
+                    
+                    // Trigger immediate refetch as backup to Realtime
+                    await refetch()
+                    console.log('[SAVE] Dashboard refetched')
+                    
                 } catch (err) {
                     console.error('[SAVE] Insert failed:', err)
                     // show toast only, never affect UI phase

@@ -7,33 +7,37 @@ export function useStudySessions() {
   const [sessions, setSessions] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
+  const load = async () => {
+    setLoading(true)
+    const { data, error } = await supabase
+      .from('study_sessions')
+      .select('*')
+      .eq('user_id', user?.id || '')
+      .order('started_at', { ascending: false })
+
+    if (!error && data) {
+      setSessions(data)
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('flowlock_sessions', JSON.stringify(data))
+      }
+    } else {
+      // fallback to cache
+      if (typeof localStorage !== 'undefined') {
+        const cached = localStorage.getItem('flowlock_sessions')
+        if (cached) setSessions(JSON.parse(cached))
+      }
+    }
+    setLoading(false)
+  }
+
+  const refetch = async () => {
+    if (!user?.id) return
+    await load()
+  }
+
   // Initial fetch
   useEffect(() => {
     if (!user?.id) return
-
-    const load = async () => {
-      setLoading(true)
-      const { data, error } = await supabase
-        .from('study_sessions')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('started_at', { ascending: false })
-
-      if (!error && data) {
-        setSessions(data)
-        if (typeof localStorage !== 'undefined') {
-          localStorage.setItem('flowlock_sessions', JSON.stringify(data))
-        }
-      } else {
-        // fallback to cache
-        if (typeof localStorage !== 'undefined') {
-          const cached = localStorage.getItem('flowlock_sessions')
-          if (cached) setSessions(JSON.parse(cached))
-        }
-      }
-      setLoading(false)
-    }
-
     load()
   }, [user?.id])
 
@@ -63,7 +67,16 @@ export function useStudySessions() {
         }
       )
       .subscribe((status) => {
-        console.log('[REALTIME] Subscription status:', status)
+        console.log('[REALTIME] Status:', status)
+        if (status === 'SUBSCRIBED') {
+          console.log('[REALTIME] ✓ Connected and listening for inserts')
+        }
+        if (status === 'CHANNEL_ERROR') {
+          console.log('[REALTIME] ✗ Channel error — likely RLS blocking stream')
+        }
+        if (status === 'TIMED_OUT') {
+          console.log('[REALTIME] ✗ Timed out — WebSocket issue')
+        }
       })
 
     return () => {
@@ -71,5 +84,5 @@ export function useStudySessions() {
     }
   }, [user?.id])
 
-  return { sessions, loading }
+  return { sessions, loading, refetch }
 }
