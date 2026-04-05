@@ -1,5 +1,9 @@
+  // @ts-ignore
   import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+  // @ts-ignore
   import { Resend } from 'https://esm.sh/resend'
+
+  declare const Deno: any;
 
   const resend = new Resend(Deno.env.get('RESEND_API_KEY'))
 
@@ -8,13 +12,22 @@
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   )
 
-  Deno.serve(async (req) => {
+  Deno.serve(async (req: Request) => {
     try {
-      // Get all users with email reports enabled
-      const { data: preferences, error: prefError } = await supabase
+      const url = new URL(req.url)
+      const testUserId = url.searchParams.get('test_user_id')
+
+      // Get all users with email reports enabled (or just the test user)
+      const query = supabase
         .from('user_preferences')
         .select('user_id, timezone')
         .eq('email_reports_enabled', true)
+      
+      if (testUserId) {
+        query.eq('user_id', testUserId)
+      }
+
+      const { data: preferences, error: prefError } = await query
 
       if (prefError) throw prefError
 
@@ -51,18 +64,18 @@
           // Compute stats
           const totalSessions = sessions.length
           const totalFocusedMs = sessions.reduce(
-            (s, r) => s + (r.focused_time_ms ?? 0), 0
+            (s: number, r: any) => s + (r.focused_time_ms ?? 0), 0
           )
           const avgFocusScore = Math.round(
-            sessions.reduce((s, r) => s + r.focus_score, 0) / totalSessions
+            sessions.reduce((s: number, r: any) => s + r.focus_score, 0) / totalSessions
           )
           const totalDistractions = sessions.reduce(
-            (s, r) => s + (r.drowsy_count ?? 0) + 
+            (s: number, r: any) => s + (r.drowsy_count ?? 0) + 
             (r.head_turned_count ?? 0) + (r.face_missing_count ?? 0) + 
             (r.unauthorized_count ?? 0) + (r.high_noise_count ?? 0), 0
           )
           const bestSession = sessions.reduce(
-            (best, s) => s.focus_score > best.focus_score ? s : best
+            (best: any, s: any) => s.focus_score > best.focus_score ? s : best
           )
 
           const totalHours = Math.floor(totalFocusedMs / 3600000)
@@ -103,7 +116,7 @@
             results.push({ email: user.email, status: 'sent' })
           }
 
-        } catch (userErr) {
+        } catch (userErr: any) {
           console.error('Error processing user:', pref.user_id, userErr)
         }
       }
@@ -113,7 +126,7 @@
         { headers: { 'Content-Type': 'application/json' } }
       )
 
-    } catch (err) {
+    } catch (err: any) {
       return new Response(
         JSON.stringify({ error: err.message }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
