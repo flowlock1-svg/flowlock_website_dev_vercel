@@ -69,17 +69,17 @@
     "recharts": "2.15.4",
     "rehype-katex": "^7.0.1",
     "remark-math": "^6.0.0",
+    "resend": "^6.10.0",
     "sonner": "^1.7.4",
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",
-    "vaul": "^0.9.9",
     "unpdf": "^0.12.1",
+    "vaul": "^0.9.9",
     "zod": "3.25.76"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.9",
     "@types/node": "^22",
-
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "postcss": "^8.5",
