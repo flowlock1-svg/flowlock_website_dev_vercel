@@ -5,8 +5,11 @@ import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Bell, Lock, User, Palette, Shield } from "lucide-react"
+import { Bell, Lock, User, Palette, Shield, Mail } from "lucide-react"
 import { useAuth } from "@/components/providers/auth-provider"
+import { Switch } from "@/components/ui/switch"
+import { toast } from "sonner"
+import { supabase } from "@/utils/supabase/client"
 
 export function SettingsPage() {
   const { theme, setTheme } = useTheme()
@@ -16,6 +19,41 @@ export function SettingsPage() {
   const [email, setEmail] = useState(user?.email || "")
   const [role, setRole] = useState("Student")
   const [isSaving, setIsSaving] = useState(false)
+  const [emailReports, setEmailReports] = useState(true)
+  const [savingPref, setSavingPref] = useState(false)
+
+  useEffect(() => {
+    const fetchPrefs = async () => {
+      if (!user?.id) return
+      const { data } = await supabase
+        .from('user_preferences')
+        .select('email_reports_enabled')
+        .eq('user_id', user.id)
+        .single()
+      if (data) setEmailReports(data.email_reports_enabled)
+    }
+    fetchPrefs()
+  }, [user?.id])
+
+  const toggleEmailReports = async (enabled: boolean) => {
+    if (!user?.id) return
+    setSavingPref(true)
+    setEmailReports(enabled)
+    
+    await supabase
+      .from('user_preferences')
+      .upsert({ 
+        user_id: user.id, 
+        email_reports_enabled: enabled,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'user_id' })
+    
+    setSavingPref(false)
+    toast.success(enabled 
+      ? 'Daily reports enabled!' 
+      : 'Daily reports disabled'
+    )
+  }
 
   const [notifications, setNotifications] = useState({
     sessionReminder: true,
@@ -191,6 +229,39 @@ export function SettingsPage() {
           ))}
         </CardContent>
       </Card>
+
+      {/* Email Preferences */}
+      <div className="rounded-xl border border-border bg-card p-6">
+        <div className="flex items-center gap-2 mb-1">
+          <Mail size={20} className="text-primary" />
+          <h3 className="text-lg font-semibold">
+            Email Preferences
+          </h3>
+        </div>
+        <p className="text-sm text-muted-foreground mb-6">
+          Manage your daily productivity report emails
+        </p>
+        
+        <div className="flex items-center justify-between py-4 border-b border-border">
+          <div>
+            <p className="font-medium">Daily Productivity Report</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              Receive a summary of your focus sessions every evening at 11:30 PM
+            </p>
+          </div>
+          <Switch
+            checked={emailReports}
+            onCheckedChange={toggleEmailReports}
+            disabled={savingPref}
+          />
+        </div>
+
+        <div className="pt-4">
+          <p className="text-xs text-muted-foreground">
+            Reports include: total focus time, average score, distraction count, and a full session breakdown. Sent to: {user?.email}
+          </p>
+        </div>
+      </div>
 
       {/* Theme Settings */}
       <Card className="bg-card border-border">
