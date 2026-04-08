@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "FlowLock Vault",
+  "version": "1.0",
+  "description": "Block distracting sites during your FlowLock focus sessions.",
+  "permissions": [
+    "declarativeNetRequest",
+    "declarativeNetRequestWithHostAccess",
+    "storage",
+    "alarms"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "FlowLock Vault"
+  }
+}
