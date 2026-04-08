@@ -18,22 +18,52 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
+// Mark the extension as connected in user_preferences via Supabase REST
+async function markExtensionConnected(supabaseUrl, anonKey, token, userId) {
+  try {
+    await fetch(`${supabaseUrl}/rest/v1/user_preferences`, {
+      method: "POST",
+      headers: {
+        "apikey": anonKey,
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates"
+      },
+      body: JSON.stringify({
+        user_id: userId,
+        extension_connected: true,
+        updated_at: new Date().toISOString()
+      })
+    });
+  } catch (err) {
+    console.warn("[FlowLock] markExtensionConnected failed:", err);
+  }
+}
+
 // Listen for external messages directly from the FlowLock web domain
 chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
   // Security guard: Ensure origin matches exactly
   if (!sender.url || !sender.url.startsWith("http://localhost:3000")) return;
 
+  if (message.type === 'PING') {
+    sendResponse({ status: 'connected' });
+    return;
+  }
+
   if (message.action === "SUPABASE_AUTH_PAYLOAD" && message.payload) {
+    const { supabaseUrl, anonKey, userId, token, refreshToken } = message.payload;
     chrome.storage.local.set({
-      supabaseUrl: message.payload.supabaseUrl,
-      anonKey: message.payload.anonKey,
-      userId: message.payload.userId,
-      token: message.payload.token,
-      refreshToken: message.payload.refreshToken,
+      supabaseUrl,
+      anonKey,
+      userId,
+      token,
+      refreshToken,
       sessionActive: false,
       blockedCount: 0
     }).then(() => {
-      // Manually trigger an immediate update block
+      // Mark the extension as connected in Supabase
+      markExtensionConnected(supabaseUrl, anonKey, token, userId);
+      // Manually trigger an immediate vault sync
       syncVaultState();
       sendResponse({ status: "success" });
     });

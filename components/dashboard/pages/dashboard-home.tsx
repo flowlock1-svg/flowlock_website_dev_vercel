@@ -67,6 +67,7 @@ import { useAuth } from "@/components/providers/auth-provider"
 import { useFocus } from "@/components/providers/focus-provider"
 import { useStudySessions } from "@/hooks/use-study-sessions"
 import { VaultManager } from "@/components/vault/VaultManager"
+import { SetupBanner } from "@/components/dashboard/setup-banner"
 
 // Helper: ms to hours
 function msToHours(ms: number) {
@@ -779,6 +780,9 @@ export default function DashboardHome() {
           )}
         </CardContent>
       </Card>
+
+      {/* Vault Protection Setup Banner */}
+      <SetupBanner />
 
       {/* Distraction Vault */}
       <div>

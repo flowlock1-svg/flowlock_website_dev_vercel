@@ -91,12 +91,55 @@ async function setupRealtimeWatcher(onSessionChangeCallback) {
     .subscribe();
 }
 
+async function markAgentConnected() {
+  if (!supabase) return;
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    await supabase
+      .from('user_preferences')
+      .upsert(
+        {
+          user_id: session.user.id,
+          agent_connected: true,
+          agent_last_ping_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        },
+        { onConflict: 'user_id' }
+      );
+  } catch (err) {
+    console.error('[FlowLock] markAgentConnected failed:', err);
+  }
+}
+
+async function updateAgentHeartbeat() {
+  if (!supabase) return;
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    await supabase
+      .from('user_preferences')
+      .upsert(
+        {
+          user_id: session.user.id,
+          agent_last_ping_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        },
+        { onConflict: 'user_id' }
+      );
+  } catch (err) {
+    // Silent fail — heartbeat is best-effort
+  }
+}
+
 async function handleAuthCallback(accessToken, refreshToken) {
   if (!supabase) await initSupabase();
   const { data, error } = await supabase.auth.setSession({
     access_token: accessToken,
     refresh_token: refreshToken
   });
+  // Mark the agent as connected in user_preferences
+  if (!error) markAgentConnected();
   return { data, error };
 }
 
@@ -127,6 +170,9 @@ async function checkActiveSession() {
 
   const userId = session.user.id;
 
+  // Update heartbeat so the dashboard knows the agent is alive
+  updateAgentHeartbeat();
+
   try {
     const { data: activeSessions, error: dbSessionErr } = await supabase
       .from('study_sessions')
@@ -147,5 +193,7 @@ module.exports = {
   hasStoredSession,
   signOut,
   checkActiveSession,
-  setupRealtimeWatcher
+  setupRealtimeWatcher,
+  markAgentConnected,
+  updateAgentHeartbeat
 };
