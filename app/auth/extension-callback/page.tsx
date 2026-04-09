@@ -1,13 +1,12 @@
 'use client';
 import { useEffect } from 'react';
-import { createClient } from '@/utils/supabase/client';
+import { supabase } from '@/utils/supabase/client';
 
 declare const chrome: any;
 
 export default function ExtensionCallbackPage() {
   useEffect(() => {
     async function sendTokenToExtension() {
-      const supabase = createClient();
       const { data: { session } } = await supabase.auth.getSession();
 
       if (!session) {
