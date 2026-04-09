@@ -1,77 +1,43 @@
-const FLOWLOCK_URL = "http://localhost:3000/blocked"; // Change to production domain when ready
+const SUPABASE_URL = "https://cutgjwfkgkoynmxpsntr.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1dGdqd2ZrZ2tveW5teHBzbnRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMxMjI1MDksImV4cCI6MjA4ODY5ODUwOX0.y0eHIyS-tZUH4_q3zqGPuDO8oiRlyBsFdN1_dNbvNrE";
+const BLOCKED_URL = "https://flowlock-website-dev-vercel.vercel.app/blocked";
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create("syncVault", { periodInMinutes: 1 });
-  syncVaultState();
+  syncVaultAndBlock();
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "syncVault") {
-    syncVaultState();
+    syncVaultAndBlock();
   }
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === "sync_now") {
-    syncVaultState().then(() => sendResponse({ status: "done" }));
-    return true; // Keep message channel open for async response
+    syncVaultAndBlock().then(() => sendResponse({ status: "done" }));
+    return true; 
+  }
+  
+  if (message.type === 'SET_AUTH') {
+    chrome.storage.local.set({
+      'sb-access-token': message.access_token,
+      'sb-user-id': message.user_id
+    }).then(() => {
+      syncVaultAndBlock();
+    });
   }
 });
 
-// Mark the extension as connected in user_preferences via Supabase REST
-async function markExtensionConnected(supabaseUrl, anonKey, token, userId) {
-  try {
-    await fetch(`${supabaseUrl}/rest/v1/user_preferences`, {
-      method: "POST",
-      headers: {
-        "apikey": anonKey,
-        "Authorization": `Bearer ${token}`,
-        "Content-Type": "application/json",
-        "Prefer": "resolution=merge-duplicates"
-      },
-      body: JSON.stringify({
-        user_id: userId,
-        extension_connected: true,
-        updated_at: new Date().toISOString()
-      })
-    });
-  } catch (err) {
-    console.warn("[FlowLock] markExtensionConnected failed:", err);
-  }
-}
-
-// Listen for external messages directly from the FlowLock web domain
+// Legacy listener for PING just in case
 chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
-  // Security guard: Ensure origin matches exactly
-  if (!sender.url || !sender.url.startsWith("http://localhost:3000")) return;
-
   if (message.type === 'PING') {
     sendResponse({ status: 'connected' });
     return;
   }
-
-  if (message.action === "SUPABASE_AUTH_PAYLOAD" && message.payload) {
-    const { supabaseUrl, anonKey, userId, token, refreshToken } = message.payload;
-    chrome.storage.local.set({
-      supabaseUrl,
-      anonKey,
-      userId,
-      token,
-      refreshToken,
-      sessionActive: false,
-      blockedCount: 0
-    }).then(() => {
-      // Mark the extension as connected in Supabase
-      markExtensionConnected(supabaseUrl, anonKey, token, userId);
-      // Manually trigger an immediate vault sync
-      syncVaultState();
-      sendResponse({ status: "success" });
-    });
-    return true; // Returns async
-  }
 });
 
-async function clearAllRules() {
+async function clearBlockingRules() {
   const oldRules = await chrome.declarativeNetRequest.getDynamicRules();
   const oldRuleIds = oldRules.map(rule => rule.id);
   if (oldRuleIds.length > 0) {
@@ -79,127 +45,90 @@ async function clearAllRules() {
   }
 }
 
-async function refreshSupabaseToken(data) {
-  if (!data.refreshToken || !data.supabaseUrl || !data.anonKey) return false;
+async function applyBlockingRules(domains) {
+  // Remove all existing dynamic rules first
+  await clearBlockingRules();
 
-  try {
-    const res = await fetch(`${data.supabaseUrl}/auth/v1/token?grant_type=refresh_token`, {
-      method: "POST",
-      headers: {
-        "apikey": data.anonKey,
-        "Content-Type": "application/json"
+  if (!domains || domains.length === 0) return;
+
+  const addRules = domains.map((domainStr, index) => {
+    // Simple sanitization: remove http:// or https:// and www.
+    const cleanDomain = domainStr.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+    return {
+      id: index + 1,
+      priority: 1,
+      action: {
+        type: "redirect",
+        redirect: { url: BLOCKED_URL }
       },
-      body: JSON.stringify({ refresh_token: data.refreshToken })
-    });
+      condition: {
+        urlFilter: `*://${cleanDomain}/*`,
+        resourceTypes: ["main_frame"]
+      }
+    };
+  });
 
-    if (!res.ok) return false;
-    
-    const refreshedData = await res.json();
-    
-    if (refreshedData.access_token && refreshedData.refresh_token) {
-      await chrome.storage.local.set({
-        token: refreshedData.access_token,
-        refreshToken: refreshedData.refresh_token
-      });
-      return true; // Successfully refreshed
-    }
-  } catch (err) {
-    console.error("Token refresh unexpectedly failed:", err);
-  }
-  return false;
+  await chrome.declarativeNetRequest.updateDynamicRules({ addRules });
 }
 
-// The core sync cycle -- takes isRetry flag to prevent infinite loops when refreshing
-async function syncVaultState(isRetry = false) {
+async function syncVaultAndBlock() {
   try {
-    const data = await chrome.storage.local.get(["token", "refreshToken", "userId", "supabaseUrl", "anonKey"]);
-    const { token, userId, supabaseUrl, anonKey } = data;
+    const data = await chrome.storage.local.get(['sb-access-token', 'sb-user-id']);
+    const token = data['sb-access-token'];
+    const userId = data['sb-user-id'];
 
-    if (!token || !userId || !supabaseUrl || !anonKey) {
-      await clearAllRules();
-      await chrome.storage.local.set({ sessionActive: false, blockedCount: 0 });
+    if (!token || !userId) {
+      await clearBlockingRules();
       return;
     }
 
     // 1. Check if ANY active session exists for this user
-    const sessionRes = await fetch(`${supabaseUrl}/rest/v1/study_sessions?user_id=eq.${userId}&status=eq.active&select=id`, {
+    const sessionRes = await fetch(`${SUPABASE_URL}/rest/v1/study_sessions?status=eq.active&select=id`, {
       method: "GET",
       headers: {
-        "apikey": anonKey,
+        "apikey": SUPABASE_ANON_KEY,
         "Authorization": `Bearer ${token}`
       }
     });
 
-    // Handle token exhaustion silently
-    if (sessionRes.status === 401 && !isRetry) {
-      const refreshed = await refreshSupabaseToken(data);
-      if (refreshed) {
-        return syncVaultState(true); // Restart the cycle perfectly using new locally stored keys
-      } else {
-        // Unrecoverable refresh (likely expired entirely). Clear current storage but don't drop config entirely.
-        await clearAllRules();
-        await chrome.storage.local.set({ sessionActive: false, blockedCount: 0, token: null });
-        return;
-      }
-    }
-
-    if (!sessionRes.ok) throw new Error(`Supabase Sessions Error: ${sessionRes.statusText}`);
-    const sessions = await sessionRes.json();
-
-    if (!sessions || sessions.length === 0) {
-      await clearAllRules();
-      await chrome.storage.local.set({ sessionActive: false, blockedCount: 0 });
+    if (!sessionRes.ok) {
+      // If token is invalid or request fails, fail open (clear rules)
+      await clearBlockingRules();
       return;
     }
 
-    // 2. We have an active session! Fetch the distraction vault
-    await chrome.storage.local.set({ sessionActive: true });
+    const sessions = await sessionRes.json();
 
-    const vaultRes = await fetch(`${supabaseUrl}/rest/v1/distraction_vault?user_id=eq.${userId}&type=eq.website&select=identifier`, {
+    if (!sessions || sessions.length === 0) {
+      // No active session -> clear blocking rules and return
+      await clearBlockingRules();
+      return;
+    }
+
+    // 2. If active session -> fetch vault websites
+    const vaultRes = await fetch(`${SUPABASE_URL}/rest/v1/distraction_vault?type=eq.website&select=identifier`, {
       method: "GET",
       headers: {
-        "apikey": anonKey,
+        "apikey": SUPABASE_ANON_KEY,
         "Authorization": `Bearer ${token}`
       }
     });
 
-    if (vaultRes.status === 401 && !isRetry) {
-      const refreshed = await refreshSupabaseToken(data);
-      if (refreshed) return syncVaultState(true);
+    if (!vaultRes.ok) {
+      await clearBlockingRules();
+      return;
     }
-
-    if (!vaultRes.ok) throw new Error(`Supabase Vault Error: ${vaultRes.statusText}`);
+    
     const vaultItems = await vaultRes.json();
+    const domains = vaultItems.map(item => item.identifier);
 
-    // 3. Update firewall rules based on vault items
-    await clearAllRules();
-
-    if (vaultItems && vaultItems.length > 0) {
-      const addRules = vaultItems.map((item, index) => {
-        // Simple sanitization: remove http:// or https:// and www.
-        const domain = item.identifier.replace(/^https?:\/\//, '').replace(/^www\./, '');
-        return {
-          id: index + 1,
-          priority: 1,
-          action: {
-            type: "redirect",
-            redirect: { url: FLOWLOCK_URL }
-          },
-          condition: {
-            urlFilter: `*://${domain}/*`,
-            resourceTypes: ["main_frame"]
-          }
-        };
-      });
-
-      await chrome.declarativeNetRequest.updateDynamicRules({ addRules });
-      await chrome.storage.local.set({ blockedCount: vaultItems.length });
-    } else {
-      await chrome.storage.local.set({ blockedCount: 0 });
-    }
+    // 3. Apply blocking rules
+    await applyBlockingRules(domains);
 
   } catch (error) {
-    console.error("syncVaultState encountered an error:", error);
-    // Silent fail on error keeps existing tracking rules alive in case of a temporary connection drop
+    console.error("syncVaultAndBlock encountered an error:", error);
+    // On unexpected errors, we could clear rules or keep them. 
+    // Fail-open is generally better for UX if there's a temporary network drop.
+    await clearBlockingRules();
   }
 }
