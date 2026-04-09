@@ -1,4 +1,4 @@
-(function() {
+(function () {
   window.localStorage.setItem('flowlock_extension_connected', 'true');
 
   function getSession() {
@@ -7,11 +7,15 @@
     );
     if (!authKey) return null;
     try {
-      return JSON.parse(localStorage.getItem(authKey));
-    } catch(e) { return null; }
+      const raw = localStorage.getItem(authKey);
+      const parsed = JSON.parse(raw);
+      // Handle both direct session and wrapped { currentSession: ... } formats
+      return parsed?.access_token ? parsed : parsed?.currentSession ?? null;
+    } catch (e) { return null; }
   }
 
   function sendAuth(session) {
+    if (!session?.access_token) return;
     chrome.runtime.sendMessage({
       type: 'SET_AUTH',
       access_token: session.access_token,
@@ -20,23 +24,31 @@
     }, () => void chrome.runtime.lastError);
   }
 
-  // Try immediately
-  const session = getSession();
-  if (session?.access_token) {
-    sendAuth(session);
+  function trySync() {
+    const session = getSession();
+    if (session?.access_token) {
+      sendAuth(session);
+      return true;
+    }
+    return false;
   }
 
-  // Also try after page fully loads (catches SPAs that hydrate late)
-  window.addEventListener('load', () => {
-    const s = getSession();
-    if (s?.access_token) sendAuth(s);
-  });
+  // Try immediately
+  if (!trySync()) {
+    // If not ready yet, poll every 500ms for up to 10 seconds
+    let attempts = 0;
+    const interval = setInterval(() => {
+      attempts++;
+      if (trySync() || attempts >= 20) {
+        clearInterval(interval);
+      }
+    }, 500);
+  }
 
-  // Also watch for auth changes (e.g. user logs in on this tab)
+  // Also watch for future auth changes
   window.addEventListener('storage', (e) => {
     if (e.key?.startsWith('sb-') && e.key?.endsWith('-auth-token')) {
-      const s = getSession();
-      if (s?.access_token) sendAuth(s);
+      trySync();
     }
   });
 })();
