@@ -35,6 +35,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
+// Watch for direct storage writes (content.js fallback path)
+// This fires syncVaultAndBlock even when sendMessage silently failed
+chrome.storage.onChanged.addListener((changes, namespace) => {
+  if (namespace === 'local' && changes['sb-access-token']?.newValue) {
+    syncVaultAndBlock();
+  }
+});
+
 // Legacy external listener (kept for backward compatibility)
 chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
   if (message.type === 'PING') {
