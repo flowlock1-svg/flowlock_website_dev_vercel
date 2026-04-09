@@ -136,7 +136,7 @@ async function syncVaultAndBlock() {
 
   try {
     const sessionRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/study_sessions?status=eq.active&select=id`,
+      `${SUPABASE_URL}/rest/v1/study_sessions?ended_at=is.null&select=id`,
       { headers: { "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${token}` } }
     );
 
