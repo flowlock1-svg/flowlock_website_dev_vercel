@@ -1,0 +1,6 @@
+{
+  "supabaseUrl": "https://cutgjwfkgkoynmxpsntr.supabase.co",
+  "anonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1dGdqd2ZrZ2tveW5teHBzbnRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMxMjI1MDksImV4cCI6MjA4ODY5ODUwOX0.y0eHIyS-tZUH4_q3zqGPuDO8oiRlyBsFdN1_dNbvNrE",
+  "token": "YOUR_CURRENT_ACCESS_TOKEN",
+  "userId": "YOUR_SUPABASE_USER_ID"
+}
